@@ -340,14 +340,19 @@ nil when there is none."
                                                       '("dx" "dy" "dz")))))
                 (dropped
                   (cond (about (drop-group (turn-group group about) others))
+                        ((string= (or (funcall param "nudge") "") "1") (nudge-group shifted others))
                         ((string= (or (funcall param "exact") "") "1") (drop-group shifted others :reach 0))
                         (t (drag-group shifted others)))))
            (if dropped
                (progn
                  (funcall store (mapcar #'(lambda (s) (or (find (spec-id s) dropped :key #'spec-id) s)) specs))
                  (reply assembly :changed ids))
-               (reply assembly :ok nil :changed ids
-                             :message (if about "No room to turn it there." "No room there.")))))
+               (let ((hit (and shifted (in-the-way shifted others))))
+                 (reply assembly :ok nil :changed ids
+                               :message (cond (about "No room to turn it there.")
+                                              (hit (format nil "No room there: it would overlap ~a (part ~a)."
+                                                           (part-label (spec-type hit) (spec-size hit)) (spec-id hit)))
+                                              (t "No room there.")))))))
 
         ((string= op "color")
          (let ((color (read-keyword (funcall param "color") *colors*)))

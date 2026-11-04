@@ -1077,16 +1077,35 @@ orientation winning a tie; nil when none snaps within reach."
 sets which way up it goes, so it may turn to fit where it is dropped."
   (notany #'(lambda (c) (member (connector-kind c) '(:stud :socket))) (world-connectors spec)))
 
+(defun lone-fit (group others reach)
+  "List of the one studless part of group fitted to the nearest joint
+within reach, turned as it needs; nil for anything else."
+  (when (and (null (rest group)) (studless-p (first group)))
+    (let ((fitted (fit-spec (first group) others :reach reach)))
+      (when fitted (list fitted)))))
+
 (defun drag-group (group others)
   "List. The group of specs as it lands when dragged and let go: as
 drop-group lands it, except that a studless part alone, which no joint
 takes as it stands, turns to the nearest joint that takes it before it
-is left loose."
+is left loose; and where it cannot stay, it looks further for one."
   (or (drop-group group others :free? nil)
+      (lone-fit group others 40)
+      (drop-group group others)
+      (lone-fit group others 200)))
+
+(defun nudge-group (group others)
+  "List. The group of specs as it lands when stepped by a key, reach 0: a
+step is a stud or a plate and a hole's axis is on neither grid, so a
+studless part alone that the step runs into something goes to the joint
+it was making for."
+  (or (drop-group group others :reach 0)
       (when (and (null (rest group)) (studless-p (first group)))
-        (let ((fitted (fit-spec (first group) others)))
-          (when fitted (list fitted))))
-      (drop-group group others)))
+        (drag-group group others))))
+
+(defun in-the-way (group others)
+  "The first of others that a member of group collides with, or nil."
+  (find-if #'(lambda (o) (some #'(lambda (s) (collide-p s o)) group)) others))
 
 ;;
 ;; Part ids: an editor names parts by id, which survives the removal of

@@ -236,7 +236,7 @@
     const key = e.key, id = selected, carry = e.shiftKey ? 0 : 1;
     if (nudges[key]) {
       const d = nudges[key];
-      api('move', { id: id, dx: d[0], dy: d[1], dz: d[2], exact: 1, carry: carry });
+      api('move', { id: id, dx: d[0], dy: d[1], dz: d[2], nudge: 1, carry: carry });
     } else if (key === 'r' || key === 'R') api('turn', { id: id, carry: carry });
     else if (key === 't' || key === 'T') api('tilt', { id: id, carry: carry });
     else if (key === 'e' || key === 'E') api('roll', { id: id, carry: carry });

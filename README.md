@@ -37,16 +37,19 @@ across restarts.
 - Drag a part to slide it across the build; on release it drops onto
   the nearest place it fits, landing on top before going underneath.
   A part with no studs or sockets (a gear, a beam, a pin) turns to fit
-  when nothing takes it as it stands.
+  when nothing takes it as it stands, and where it cannot stay it looks
+  further, ten studs off, for a joint that takes it.
 - A part moves with what it carries: whatever rests on it and nothing
   else (a plate bridging it and a neighbor stays), and whatever hangs
   from those (a beam on pins, a wheel on an axle) without standing on
   the ground through the rest of the build.  The carried parts glow
   softly when the part is selected, and the group drops, snaps and
   turns as one body.  Hold Shift to move the part alone.
-- Arrow keys nudge the selected part a stud, PgUp and PgDn a plate; R,
-  T and E turn, tilt and roll it a quarter; C copies it on top; Delete
-  removes it; a swatch recolors it.
+- Arrow keys nudge the selected part a stud, PgUp and PgDn a plate; a
+  part with no studs that a step runs into something goes to the joint
+  it was making for, since a hole's axis is on neither grid.  R, T and E
+  turn, tilt and roll it a quarter; C copies it on top; Delete removes
+  it; a swatch recolors it.
 - The report counts joined pairs and names overlapping and loose
   parts, and keeps the parts list.
 
