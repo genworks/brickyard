@@ -551,7 +551,7 @@ an empty group the parts go into."
   (setf *gate* (uiop:symbol-call :invite-gate :make-gate
                                  :name "Brickyard" :prefix "/brickyard" :cookie "brickyard_invite"
                                  :invites-file invites-file :public-base public-base))
-  (when (boundp 'net.aserve:*wserver*) (publish-invite-door net.aserve:*wserver*))
+  (gwl:with-all-servers (server) (publish-invite-door server))
   *gate*)
 
 (defun publish-brickyard (server)
@@ -564,9 +564,10 @@ an empty group the parts go into."
                                 :destination (namestring *static-directory*))
   (publish-invite-door server))
 
-;; Published with the rest when the server starts; and now, when it is
-;; already running (a load into a live room).
+;; Published with the rest when the server starts; and now, on Gendl's
+;; own servers (net.aserve:*wserver* need not be the one listening), for
+;; a load into a live room.
 (pushnew 'publish-brickyard gwl::*publishers*)
 
-(when (boundp 'net.aserve:*wserver*)
-  (publish-brickyard net.aserve:*wserver*))
+(gwl:with-all-servers (server)
+  (publish-brickyard server))
