@@ -24,7 +24,7 @@
 ;;
 ;; :type   :brick (w l [plates-high, default 3]), :plate (w l), :tile (w l),
 ;;         :technic-brick (l), :beam (holes), :axle (studs long), :pin (),
-;;         :wheel (d [w, default 2]), :motor (), :controller ()
+;;         :wheel (d [w, default 2]), :motor (), :controller (), :gear (teeth)
 ;; :at     the part's anchor in LDU: the center of the bottom face for
 ;;         bricks, plates and tiles, the middle of the part otherwise
 ;; :up :rear   where the part's own :top and :rear face, as axis keywords
@@ -44,7 +44,7 @@ still pull the part onto it (three studs).")
 (defparameter *default-colors*
   '(:brick :red :plate :blue :tile :yellow :technic-brick :grey
     :beam :grey-light :axle :black :pin :black
-    :wheel :grey-light :motor :grey-light :controller :white))
+    :wheel :grey-light :motor :grey-light :controller :white :gear :grey))
 
 (defun mm (ldu) (* ldu *mm-per-ldu*))
 
@@ -102,7 +102,7 @@ brick family, (n) for beams and axles, () for a pin."
       (:brick (list (first size) (second size) (or (third size) 3)))
       ((:plate :tile) (list (first size) (second size) 1))
       (:technic-brick (list 1 (first size) 3))
-      ((:beam :axle) (list (first size)))
+      ((:beam :axle :gear) (list (first size)))
       (:wheel (list (first size) (or (second size) 2)))
       ((:pin :motor :controller) nil))))
 
@@ -115,7 +115,12 @@ brick family, (n) for beams and axles, () for a pin."
 ;; half is the connector's half-length along that axis.
 ;;
 
-(defstruct connector kind point dir (half 0))
+(defstruct connector kind point dir (half 0) (radius 0))
+
+(defun pitch-radius (teeth)
+  "LDU. A gear's pitch radius: half a millimeter per tooth, so gears whose
+teeth add up to 32 mesh two studs apart (8 and 24, 16 and 16)."
+  (* 5/4 teeth))
 
 (defun row-offset (j n)
   "LDU from the middle of a row of n places, 20 apart, to place j."
@@ -165,6 +170,10 @@ brick family, (n) for beams and axles, () for a pin."
              (make-connector :kind :pin :point '(0 10 0) :dir '(0 1 0) :half 10)))
       (:wheel
        (list (make-connector :kind :axle-hole :point '(0 0 0) :dir '(0 1 0) :half (* 10 (second size)))))
+      (:gear
+       (list (make-connector :kind :axle-hole :point '(0 0 0) :dir '(0 1 0) :half 5)
+             (make-connector :kind :gear :point '(0 0 0) :dir '(0 1 0) :half 5
+                             :radius (pitch-radius (first size)))))
       (:motor
        (append (grid-connectors :stud 2 4 48 '(0 0 1))
                (grid-connectors :socket 2 4 0 '(0 0 -1))
@@ -188,6 +197,8 @@ brick family, (n) for beams and axles, () for a pin."
       (:pin (list '(-6 -20 -6) '(6 20 6)))
       (:wheel (destructuring-bind (d w) size
                 (list (list (* -10 d) (* -10 w) (* -10 d)) (list (* 10 d) (* 10 w) (* 10 d)))))
+      (:gear (let ((r (+ (pitch-radius (first size)) 5/2)))
+               (list (list (- r) -5 (- r)) (list r 5 r))))
       (:motor (list '(-20 -40 0) '(20 60 48)))
       (:controller (list '(-40 -60 0) '(40 60 48))))))
 
@@ -196,21 +207,63 @@ brick family, (n) for beams and axles, () for a pin."
 ;; it stands on.
 ;;
 
-(defun drives (specs)
-  "List of (motor wheel) index pairs: a wheel on an axle held in a motor's output."
-  (let ((indexed (mapcar #'cons (iota (length specs)) specs)) result)
-    (flet ((of-type (type) (remove type indexed :key #'(lambda (e) (spec-type (rest e))) :test-not #'eql))
-           (held-p (a b &optional (kind nil kind?))
-             (some #'(lambda (ca)
-                       (and (or (not kind?) (eql (connector-kind ca) kind))
-                            (some #'(lambda (cb) (mate-p ca cb)) (world-connectors b))))
-                   (world-connectors a))))
-      (dolist (motor (of-type :motor) (nreverse result))
-        (dolist (axle (of-type :axle))
-          (when (held-p (rest motor) (rest axle) :axle-hole)
-            (dolist (wheel (of-type :wheel))
-              (when (held-p (rest axle) (rest wheel))
-                (push (list (first motor) (first wheel)) result)))))))))
+(defun power-flow (specs)
+  "Two values.  A list of (motor wheel ratio): each wheel a motor turns,
+and how fast against the motor -- 1/3 is a third the speed, negative
+is the other way round.  And a list of the indices of parts that two
+paths from one motor would turn at different speeds: a jammed train.
+
+Power goes from a motor's output into the axle it holds; from an axle
+into the gears and wheels whose axle holes it fills; from a gear or
+wheel into its axle and, for a gear, into the gears it meshes with,
+whose speed is the driver's times its teeth over theirs, reversed.
+An axle in a round pin hole turns freely and carries nothing."
+  (let* ((n (length specs))
+         (types (coerce (mapcar #'spec-type specs) 'vector))
+         (connectors (coerce (mapcar #'world-connectors specs) 'vector))
+         drives jammed)
+    (labels ((held-p (i kind-i j kind-j)
+               (some #'(lambda (a)
+                         (and (eql (connector-kind a) kind-i)
+                              (some #'(lambda (b) (and (eql (connector-kind b) kind-j) (mate-p a b)))
+                                    (aref connectors j))))
+                     (aref connectors i)))
+             (teeth (i) (first (spec-size (nth i specs))))
+             (onward (i speed)
+               "List of (j speed) for the parts part i turns directly."
+               (let (result)
+                 (dotimes (j n result)
+                   (unless (= i j)
+                     (case (aref types i)
+                       (:axle
+                        (when (and (member (aref types j) '(:gear :wheel)) (held-p j :axle-hole i :axle))
+                          (push (list j speed) result)))
+                       ((:gear :wheel)
+                        (when (and (eql (aref types j) :axle) (held-p i :axle-hole j :axle))
+                          (push (list j speed) result))
+                        (when (and (eql (aref types i) :gear) (eql (aref types j) :gear)
+                                   (held-p i :gear j :gear))
+                          (push (list j (- (* speed (/ (teeth i) (teeth j))))) result)))))))))
+      (dotimes (m n)
+        (when (eql (aref types m) :motor)
+          (let ((speeds (make-hash-table))
+                (queue (remove nil (mapcar #'(lambda (j)
+                                               (when (and (eql (aref types j) :axle)
+                                                          (held-p m :axle-hole j :axle))
+                                                 (list j 1)))
+                                           (iota n)))))
+            (do () ((null queue))
+              (destructuring-bind (i speed) (pop queue)
+                (multiple-value-bind (known seen?) (gethash i speeds)
+                  (cond ((not seen?)
+                         (setf (gethash i speeds) speed)
+                         (setf queue (append queue (onward i speed))))
+                        ((/= known speed) (pushnew i jammed))))))
+            (dotimes (w n)
+              (when (eql (aref types w) :wheel)
+                (multiple-value-bind (speed seen?) (gethash w speeds)
+                  (when seen? (push (list m w speed) drives))))))))
+      (values (nreverse drives) (sort jammed #'<)))))
 
 (defun ground-contacts (specs &key (tolerance 2))
   "List of indices of the parts whose lowest point is within tolerance LDU of the build's."
@@ -224,6 +277,7 @@ brick family, (n) for beams and axles, () for a pin."
   (let ((rows (part-rotation (spec-up spec) (spec-rear spec))) (at (spec-at spec)))
     (mapcar #'(lambda (c)
                 (make-connector :kind (connector-kind c) :half (connector-half c)
+                                :radius (connector-radius c)
                                 :point (v+ at (rotate rows (connector-point c)))
                                 :dir (rotate rows (connector-dir c))))
             (local-connectors spec))))
@@ -246,6 +300,7 @@ round hole turns freely; it is still held.")
 (defun complementary-p (a b)
   (let ((ka (connector-kind a)) (kb (connector-kind b)))
     (cond ((or (and (eql ka :stud) (eql kb :socket)) (and (eql ka :socket) (eql kb :stud))) :face)
+          ((and (eql ka :gear) (eql kb :gear)) :mesh)
           ((or (member (cons ka kb) *axial-mates* :test #'equal)
                (member (cons kb ka) *axial-mates* :test #'equal))
            :axial))))
@@ -261,7 +316,18 @@ round hole turns freely; it is still held.")
               (and (zero-vector-p (cross dir (connector-dir b)))
                    (zero-vector-p (cross d dir))
                    (< (abs (dot d dir)) (+ (connector-half a) (connector-half b)))
-                   :axial)))))
+                   :axial)))
+    ;; two gears on parallel axes, faces overlapping, centers apart by
+    ;; the sum of their pitch radii -- in any direction across the axes
+    (:mesh (let* ((d (v- (connector-point b) (connector-point a)))
+                  (dir (connector-dir a))
+                  (along (dot d dir))
+                  (across (v- d (mapcar #'(lambda (x) (* along x)) dir)))
+                  (reach (+ (connector-radius a) (connector-radius b))))
+             (and (zero-vector-p (cross dir (connector-dir b)))
+                  (< (abs along) (+ (connector-half a) (connector-half b)))
+                  (= (dot across across) (* reach reach))
+                  :mesh)))))
 
 (defun joints (spec-a spec-b)
   "List of (kind point) for every pair of connectors of the two parts that mate."
@@ -286,9 +352,10 @@ round hole turns freely; it is still held.")
          (first ea) (second ea) (first eb) (second eb)))
 
 (defun collide-p (spec-a spec-b)
-  "True when the parts take the same space and are not a pin or axle in its hole."
+  "True when the parts take the same space and are not a pin or axle in
+its hole, nor two gears in mesh."
   (and (extents-overlap-p (world-extent spec-a) (world-extent spec-b))
-       (notany #'(lambda (j) (eql (first j) :axial)) (joints spec-a spec-b))))
+       (notany #'(lambda (j) (member (first j) '(:axial :mesh))) (joints spec-a spec-b))))
 
 (defun collisions (specs)
   (collect-pairs #'(lambda (i j a b) (when (collide-p a b) (list i j))) specs))
@@ -308,17 +375,20 @@ round hole turns freely; it is still held.")
 ;; nearest joint that leaves it clear of every other part.
 ;;
 
-(defun axial-move (a b)
-  "The move bringing connector a onto b's axis.  Along the axis it slides
-as little as it can in half-stud steps while the shorter of the two
-stays wholly on the longer: a pin seats in its hole, a beam rides
-anywhere along an axle."
+(defun axial-moves (a b)
+  "List of the moves bringing connector a onto b's axis, nearest first.
+Along the axis it may stop at any half-stud step that keeps the shorter
+of the two wholly on the longer: a pin seats in its hole, a gear or a
+beam rides anywhere along an axle, so when the nearest stop is taken
+the next one along is offered."
   (let* ((dir (connector-dir a))
          (d (v- (connector-point b) (connector-point a)))
          (along (dot d dir))
          (slack (* 10 (floor (abs (- (connector-half a) (connector-half b))) 10)))
-         (offset (max (- slack) (min slack (* 10 (round along 10))))))
-    (v- d (mapcar #'(lambda (x) (* offset x)) dir))))
+         (offsets (mapcar #'(lambda (k) (- (* 10 k) slack)) (iota (1+ (/ slack 5) )))))
+    (mapcar #'(lambda (offset) (v- d (mapcar #'(lambda (x) (* offset x)) dir)))
+            (stable-sort (remove-if #'(lambda (o) (> (abs o) slack)) offsets)
+                         #'< :key #'(lambda (o) (abs (- o along)))))))
 
 (defun snap-moves (spec others)
   "List of (distance . move) for every way one of the spec's connectors
@@ -326,12 +396,12 @@ could be brought onto a mating connector of the others, nearest first."
   (let ((theirs (mapcan #'world-connectors others)) result)
     (dolist (a (world-connectors spec))
       (dolist (b theirs)
-        (let ((move (case (complementary-p a b)
-                      (:face (when (zero-vector-p (v+ (connector-dir a) (connector-dir b)))
-                               (v- (connector-point b) (connector-point a))))
-                      (:axial (when (zero-vector-p (cross (connector-dir a) (connector-dir b)))
-                                (axial-move a b))))))
-          (when move (push (cons (sqrt (dot move move)) move) result)))))
+        (dolist (move (case (complementary-p a b)
+                        (:face (when (zero-vector-p (v+ (connector-dir a) (connector-dir b)))
+                                 (list (v- (connector-point b) (connector-point a)))))
+                        (:axial (when (zero-vector-p (cross (connector-dir a) (connector-dir b)))
+                                  (axial-moves a b)))))
+          (push (cons (sqrt (dot move move)) move) result))))
     (stable-sort (nreverse result) #'< :key #'first)))
 
 (defun collides-with-any-p (spec others)

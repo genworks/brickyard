@@ -33,6 +33,19 @@ an axle through both, and a beam pinned to one side.")
   "List of specs. A drive base: two motors under a plate, each turning a
 wheel on an axle, the controller on top, and a skid at the front.")
 
+(defparameter *gearbox-build*
+  '((:type :technic-brick :size (8) :at (-30 0 0))
+    (:type :technic-brick :size (8) :at (30 0 0))
+    (:type :motor :at (100 -20 -10) :rear :left)
+    (:type :axle :size (5) :at (0 -20 14) :rear :right)
+    (:type :axle :size (8) :at (0 20 14) :rear :right)
+    (:type :gear :size (8) :at (0 -20 14) :rear :right)
+    (:type :gear :size (24) :color :tan :at (0 20 14) :rear :right)
+    (:type :wheel :size (5 2) :at (-70 20 14) :rear :right))
+  "List of specs. A reduction: the motor turns an 8-tooth gear that turns
+a 24-tooth gear two studs away, which carries a wheel round at a third
+of the motor's speed, the other way.")
+
 
 (define-object assembly (base-object)
   :documentation (:description "A build: the parts its specs name, and what holds them together.")
@@ -47,8 +60,11 @@ wheel on an axle, the controller on top, and a skid at the front.")
    (groups (groups (length (the part-specs)) (the connections)))
    ("List of indices. Parts not held, through any chain of joints, to the first part."
     loose (sort (apply #'append (rest (the groups))) #'<))
-   ("List of (motor wheel) index pairs: each wheel a motor turns."
-    drives (drives (the part-specs)))
+   (power-flow (multiple-value-list (power-flow (the part-specs))))
+   ("List of (motor wheel speed): each wheel a motor turns, at what speed against it."
+    drives (first (the power-flow)))
+   ("List of indices. Parts a motor would turn at two speeds at once: a jammed train."
+    jammed (second (the power-flow)))
    ("List of indices. The parts the build stands on, loose parts left out."
     ground-contacts (let ((held (remove-if #'(lambda (i) (member i (the loose)))
                                            (iota (length (the part-specs))))))

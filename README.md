@@ -62,14 +62,28 @@ goes to the server, which answers with the parts that changed.
 | `:wheel` | `(d [w])`: d studs across, w wide (2 by default) | its middle |
 | `:motor` | none: 2 by 4 studs, two bricks high, output hub at its rear | center of the bottom face |
 | `:controller` | none: 4 by 6 studs, two bricks high | center of the bottom face |
+| `:gear` | `(teeth)`: 8, 16, 24, 40 in the bin, any count works | its middle |
 
 The wheel, motor and controller are this program's own designs, sized
 to the stud grid.  A wheel has an axle hole through its hub; a motor
 has studs on top, sockets below, pin holes across it and an output hub
 that holds an axle; a controller has studs on its two end rows, a
-screen, four ports and pin holes down both long sides.  The build
-reports which motor drives which wheel (motor output, axle, wheel) and
-which parts it stands on.  `?new=robot` opens a small drive base.
+screen, four ports and pin holes down both long sides.  `?new=robot`
+opens a small drive base.
+
+A gear's pitch radius is half a millimeter per tooth, so gears whose
+teeth add up to 32 mesh two studs apart (8 and 24, 16 and 16) and 24
+and 40 mesh four apart.  Two gears mesh when their axes are parallel,
+their faces overlap and their centers stand exactly the two radii
+apart, in any direction across the axes.  The build follows power from
+each motor's output: into the axle it holds, into the gears and wheels
+on that axle, across each mesh (the driven gear turns the other way,
+at the driver's teeth over its own), and on through their axles.  It
+reports each wheel a motor turns, how fast against the motor and
+which way, and calls a train jammed when one motor would turn a part
+at two speeds.  `?new=gearbox` opens an 8-to-24 reduction: the wheel
+turns at a third of the motor's speed, reversed.  An axle in a round
+pin hole turns freely and carries nothing.
 
 Positions are whole LDraw units (LDU): a stud pitch is 20, a plate 8,
 a brick 24; one LDU is 0.4 mm.  Axes follow Gendl: X `:right`, Y

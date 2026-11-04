@@ -140,6 +140,30 @@
         :display-controls (the display-controls))))
 
 
+(define-object gear (part-mixin)
+  :documentation (:description "A spur gear turning on an axle along its own :rear: a disk and its teeth.")
+
+  :computed-slots
+  ((teeth (first (the size)))
+   (pitch-radius (mm (pitch-radius (the teeth))))
+   (axis (the (face-normal-vector :rear)))
+   (spoke (the (face-normal-vector :top))))
+
+  :objects
+  ((disk :type 'cylinder
+         :radius (- (the pitch-radius) 0.7) :length 3.8
+         :display-controls (the display-controls))
+
+   (cogs :type 'box
+         :sequence (:size (the teeth))
+         :pseudo-inputs (radial)
+         :radial (rotate-vector-d (the spoke) (* (+ (the-child index) 1/2) (/ 360 (the teeth))) (the axis))
+         :width 1.4 :length 3.8 :height 2.2
+         :center (translate-along-vector (the center) (the-child radial) (- (the pitch-radius) 0.1))
+         :orientation (alignment :rear (the axis) :top (the-child radial))
+         :display-controls (the display-controls))))
+
+
 (define-object motor (part-mixin)
   :documentation (:description "A motor: a studded body two bricks high and an output hub that turns an axle.")
 
@@ -180,5 +204,6 @@
     (:axle 'axle)
     (:pin 'pin)
     (:wheel 'wheel)
+    (:gear 'gear)
     (:motor 'motor)
     (:controller 'controller)))

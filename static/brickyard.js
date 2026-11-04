@@ -114,15 +114,20 @@
       lines.push(status.collisions.length + ' overlapping: ' + status.collisions.map(function (p) { return p.join('/'); }).join(', '));
     if (status.loose.length)
       lines.push(status.loose.length + ' loose: ' + status.loose.join(', '));
-    const warnings = lines.length;
     const name = function (id) { const p = parts.get(id); return (p ? p.label : 'part') + ' (' + id + ')'; };
+    if (status.jammed.length)
+      lines.push('Jammed: ' + status.jammed.map(name).join(', ') + ' would turn two ways at once');
+    const warnings = lines.length;
+    if (status.meshes)
+      lines.push(status.meshes + (status.meshes === 1 ? ' gear pair meshes' : ' gear pairs mesh'));
     const byMotor = new Map();
-    status.drives.forEach(function (pair) {
-      if (!byMotor.has(pair[0])) byMotor.set(pair[0], []);
-      byMotor.get(pair[0]).push(pair[1]);
+    status.drives.forEach(function (d) {
+      if (!byMotor.has(d.motor)) byMotor.set(d.motor, []);
+      byMotor.get(d.motor).push(name(d.wheel) + (status.jammed.length ? ', but the train is jammed' :
+        (d.speed === '1' ? '' : ' at ' + d.speed + ' speed') + (d.reversed ? ', reversed' : '')));
     });
     byMotor.forEach(function (wheels, motor) {
-      lines.push(name(motor) + ' drives ' + wheels.map(name).join(', '));
+      lines.push(name(motor) + ' drives ' + wheels.join('; '));
     });
     if (status.ground.length)
       lines.push('Stands on ' + status.ground.map(name).join(', '));

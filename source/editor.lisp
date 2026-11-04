@@ -39,7 +39,8 @@
     ("Tiles" (:tile (1 2)) (:tile (2 2)))
     ("Technic" (:technic-brick (4)) (:technic-brick (8)) (:technic-brick (16))
      (:beam (3)) (:beam (5)) (:beam (7)) (:beam (9)) (:beam (15))
-     (:axle (3)) (:axle (4)) (:axle (6)) (:axle (8)) (:axle (12)) (:pin nil))
+     (:axle (3)) (:axle (4)) (:axle (6)) (:axle (8)) (:axle (12)) (:pin nil)
+     (:gear (8)) (:gear (16)) (:gear (24)) (:gear (40)))
     ("Robot" (:wheel (3 1)) (:wheel (4 2)) (:wheel (5 2)) (:wheel (7 3)) (:motor nil) (:controller nil)))
   "List of (heading (type size) ...) for the page's parts bin.")
 
@@ -128,13 +129,13 @@ nil when there is none."
                             ((zerop (mod h 3)) (format nil "~ax~ax~a" w l (/ h 3)))
                             (t (format nil "~ax~a, ~a plates high" w l h)))))
             ((:plate :tile :technic-brick :wheel) (format nil "~ax~a" (first size) (second size)))
-            ((:beam :axle) (format nil "~a" (first size))))))
+            ((:beam :axle :gear) (format nil "~a" (first size))))))
 
 (defun bin-label (type size)
   (case type
     (:pin "Pin") (:motor "Motor") (:controller "Controller")
     (t (format nil "~:[~;~:*~a ~]~{~a~^x~}"
-               (case type (:beam "Beam") (:axle "Axle") (:technic-brick "Tech") (:wheel "Wheel"))
+               (case type (:beam "Beam") (:axle "Axle") (:technic-brick "Tech") (:wheel "Wheel") (:gear "Gear"))
                size))))
 
 (defun status-json (assembly)
@@ -147,9 +148,15 @@ nil when there is none."
                                  (the-object assembly collisions))
                          'vector)
      :loose (coerce (mapcar id-of (the-object assembly loose)) 'vector)
-     :drives (coerce (mapcar #'(lambda (pair) (coerce (mapcar id-of pair) 'vector))
+     :drives (coerce (mapcar #'(lambda (drive)
+                                 (destructuring-bind (motor wheel speed) drive
+                                   (json-object :motor (funcall id-of motor) :wheel (funcall id-of wheel)
+                                                :speed (format nil "~a" (abs speed))
+                                                :reversed (minusp speed))))
                              (the-object assembly drives))
                      'vector)
+     :meshes (count-if #'(lambda (c) (member :mesh (fourth c))) (the-object assembly connections))
+     :jammed (coerce (mapcar id-of (the-object assembly jammed)) 'vector)
      :ground (coerce (mapcar id-of (the-object assembly ground-contacts)) 'vector)
      :bom (coerce (mapcar #'(lambda (entry)
                               (destructuring-bind (count type size color) entry
@@ -208,7 +215,7 @@ nil when there is none."
 
         ((string= op "add")
          (let* ((type (read-keyword (funcall param "type") '(:brick :plate :tile :technic-brick :beam :axle :pin
-                                                              :wheel :motor :controller)))
+                                                              :wheel :motor :controller :gear)))
                 (size (read-size (funcall param "size")))
                 (color (read-keyword (funcall param "color") *colors*))
                 (near (let ((v (funcall param "near"))) (and v (find (read-number v) specs :key #'spec-id))))
@@ -284,6 +291,7 @@ nil when there is none."
        (:span :id "build-name" (cl-who:str build-id))
        (:a :href "/brickyard?new=1" "New build")
        (:a :href "/brickyard?new=robot" "Robot build")
+       (:a :href "/brickyard?new=gearbox" "Gearbox")
        (:a :href "/brickyard?new=empty" "Empty build"))
       (:main
        (:aside :id "bin"
@@ -353,6 +361,7 @@ an empty group the parts go into."
                                      (bt:with-lock-held (*builds-lock*)
                                        (make-build :specs (cond ((string= new "empty") nil)
                                                                 ((string= new "robot") *robot-build*)
+                                                                ((string= new "gearbox") *gearbox-build*)
                                                                 (t *sample-build*)))))))
           ((and id (bt:with-lock-held (*builds-lock*) (find-build id)))
            (respond req ent "text/html; charset=utf-8" (page-html id)))
@@ -378,6 +387,9 @@ an empty group the parts go into."
   (net.aserve:publish-directory :prefix "/brickyard/static/" :server server
                                 :destination (namestring *static-directory*)))
 
+;; Published with the rest when the server starts; and now, when it is
+;; already running (a load into a live room).
 (pushnew 'publish-brickyard gwl::*publishers*)
 
-(publish-brickyard net.aserve:*wserver*)
+(when (boundp 'net.aserve:*wserver*)
+  (publish-brickyard net.aserve:*wserver*))
