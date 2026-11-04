@@ -235,6 +235,11 @@ survey in about half a second, which every edit of the build repeats.")
                 (> (length unknown) 5))))
     (when (plusp (getf report :turned))
       (format s " Left out ~d turned off the square grid." (getf report :turned)))
+    (when (plusp (getf report :straightened 0))
+      (format s " Set square a slight tilt the model was shown at."))
+    (when (plusp (getf report :drawn 0))
+      (format s " Skipped ~d pieces of drawn geometry (springs, ropes and the like), which are not parts."
+              (getf report :drawn)))
     (when (plusp (getf report :recolored))
       (format s " ~d in colors Brickyard lacks became grey." (getf report :recolored)))
     (when (plusp (getf report :unreadable))
@@ -334,15 +339,39 @@ document; one section named \"\" when the text has none."
         (when (and type (every #'(lambda (n) (and (integerp n) (< 0 n 100))) size))
           (list type size))))))
 
-(defun square-matrix (rows)
-  "The rows rounded to an integer rotation when every entry is within a
-thousandth of -1, 0 or 1 and the result turns without mirroring; else nil."
+(defun square-matrix (rows &optional (tolerance 1/1000))
+  "The rows rounded to an integer rotation when every entry is within
+tolerance of -1, 0 or 1 and the result turns without mirroring; else nil."
   (let ((rounded (mapcar #'(lambda (row) (mapcar #'round row)) rows)))
-    (when (and (every #'(lambda (row r) (every #'(lambda (x y) (< (abs (- x y)) 1/1000)) row r)) rows rounded)
+    (when (and (every #'(lambda (row r) (every #'(lambda (x y) (< (abs (- x y)) tolerance)) row r)) rows rounded)
                (every #'(lambda (row) (= 1 (count-if-not #'zerop row))) rounded)
                (equal (rotate rounded '(0 0 1))
                       (cross (rotate rounded '(1 0 0)) (rotate rounded '(0 1 0)))))
       rounded)))
+
+(defparameter *presentation-tilt* 9/50
+  "Number. A placement in the main model whose matrix is within this of a
+square turn in every entry -- about ten degrees -- is taken for a pose
+the author gave the whole model to show it off, and set square.")
+
+(defun drawn-geometry-p (name)
+  "True when a referenced file looks like an LDraw primitive (4-4cyli,
+rect2p, box2-7, stud4 ...) rather than a part: drawing, not a brick.
+Parts are known by a run of three or more digits (3001, 32062, u9006)."
+  (let* ((stem (if (and (> (length name) 4) (string= ".dat" (subseq name (- (length name) 4))))
+                   (subseq name 0 (- (length name) 4))
+                   name))
+         (stem (subseq stem (1+ (or (position #\/ stem :from-end t) -1))))
+         (run 0) (longest 0))
+    (dotimes (i (length stem))
+      (if (digit-char-p (char stem i))
+          (setf longest (max longest (incf run)))
+          (setf run 0)))
+    (and (plusp (length stem))
+         (or (and (alpha-char-p (char stem 0)) (< longest 3))
+             (let ((dash (position #\- stem)))
+               (and dash (plusp dash) (every #'digit-char-p (subseq stem 0 dash))
+                    (< dash (1- (length stem))) (digit-char-p (char stem (1+ dash)))))))))
 
 (defun color-from-ldraw (code)
   (or (car (rassoc code *ldraw-colors*)) (cdr (assoc code *ldraw-color-names*))))
@@ -358,7 +387,7 @@ was too long to read at all."
          (sections (when (<= (length text) (getf limits :bytes)) (ldraw-sections text)))
          (catalog (ldraw-catalog))
          (specs nil) (unknown nil) (turned 0) (recolored 0) (submodels 0) (count 0) (visits 0) (cut nil)
-         (unreadable 0))
+         (unreadable 0) (drawn 0) (straightened 0))
     (labels ((place (tokens parent-color parent-p parent-a depth)
                (when (> (incf visits) (getf limits :visits)) (setf cut t) (return-from place))
                (unless (>= (length tokens) 15) (incf unreadable) (return-from place))
@@ -397,12 +426,23 @@ was too long to read at all."
                           (dolist (child (rest section))
                             (when (string= (first child) "1")
                               (place child code p a (1+ depth)))))
+                         ((drawn-geometry-p file) (incf drawn))
                          (t (let ((entry (assoc file unknown :test #'string=)))
                               (if entry (incf (rest entry)) (push (cons file 1) unknown)))))))))
       (dolist (tokens (rest (first sections)))
         (when (and tokens (string= (first tokens) "1"))
+          ;; a slight tilt of the whole model, given to show it off, is set square
+          (let* ((numbers (and (>= (length tokens) 15) (mapcar #'parse-decimal (subseq tokens 5 14))))
+                 (rows (and numbers (notany #'null numbers)
+                            (list (subseq numbers 0 3) (subseq numbers 3 6) (subseq numbers 6 9)))))
+            (when (and rows (not (square-matrix rows)) (square-matrix rows *presentation-tilt*))
+              (incf straightened)
+              (setf tokens (append (subseq tokens 0 5)
+                                   (mapcar #'princ-to-string (reduce #'append (square-matrix rows *presentation-tilt*)))
+                                   (nthcdr 14 tokens)))))
           (place tokens 16 '(0 0 0) '((1 0 0) (0 1 0) (0 0 1)) 0))))
     (values (nreverse specs)
             (list :unknown (sort unknown #'> :key #'rest) :turned turned :recolored recolored
-                  :submodels submodels :unreadable unreadable :cut cut
+                  :submodels submodels :unreadable unreadable :cut cut :drawn drawn
+                  :straightened straightened
                   :too-big (> (length text) (getf limits :bytes))))))

@@ -60,8 +60,12 @@ of the motor's speed, the other way.")
    (connections (connections (the part-specs) (the survey)))
    (collisions (collisions (the part-specs) (the survey)))
    (groups (groups (length (the part-specs)) (the connections)))
-   ("List of indices. Parts not held, through any chain of joints, to the first part."
-    loose (sort (apply #'append (rest (the groups))) #'<))
+   ("List of indices. Parts not held, through any chain of joints, to the
+main body: the largest group, or of the largest the one with the earliest
+part."
+    loose (let ((main (reduce #'(lambda (best g) (if (> (length g) (length best)) g best))
+                              (the groups) :initial-value nil)))
+            (sort (apply #'append (remove main (the groups) :test #'eq)) #'<)))
    (power-flow (multiple-value-list (power-flow (the part-specs) (the survey))))
    ("List of (motor wheel speed): each wheel a motor turns, at what speed against it."
     drives (first (the power-flow)))

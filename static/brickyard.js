@@ -149,7 +149,8 @@
     if (status.collisions.length)
       lines.push(status.collisions.length + ' overlapping: ' + status.collisions.map(function (p) { return p.join('/'); }).join(', '));
     if (status.loose.length)
-      lines.push(status.loose.length + ' loose: ' + status.loose.join(', '));
+      lines.push(status.loose.length + ' loose: ' + status.loose.slice(0, 12).join(', ') +
+                 (status.loose.length > 12 ? ' and ' + (status.loose.length - 12) + ' more' : ''));
     const name = function (id) { const p = parts.get(id); return (p ? p.label : 'part') + ' (' + id + ')'; };
     if (status.jammed.length)
       lines.push('Jammed: ' + status.jammed.map(name).join(', ') + ' would turn two ways at once');
