@@ -883,16 +883,19 @@ the position it has, which is rarely whole."
 (defun group-clear-p (group others)
   (notany #'(lambda (s) (collides-with-any-p s others)) group))
 
-(defun drop-group (group others &key (reach 40) (free? t))
+(defun drop-group (group others &key (reach 40) (free? t) onto)
   "List. The group of specs, moved as one rigid body, as it lands when let
 go where it stands: onto the clear joint nearest in plan within reach
-LDU that any member makes with the others, any height, landing on top
-before going underneath; failing that, when free? and it is clear where
-it is, left there with its first member on a grid of half studs and
-plates (it will be loose); else nil."
+LDU that any member makes with the others (with onto alone, when that
+spec is given), any height, landing on top before going underneath;
+failing that, when free? and it is clear where it is, left there with
+its first member on a grid of half studs and plates (it will be loose);
+else nil."
   (let* ((group (mapcar #'grid-spec group))
          (others (mapcar #'placed others))
-         (theirs (mapcan #'(lambda (o) (copy-list (placed-connectors o))) others))
+         (theirs (if onto
+                     (world-connectors onto)
+                     (mapcan #'(lambda (o) (copy-list (placed-connectors o))) others)))
          (moves (remove-if #'(lambda (m) (> (first (move-rank m)) reach))
                            (mapcan #'(lambda (s) (mapcar #'rest (snap-moves s nil theirs))) group))))
     (or (dolist (move (stable-sort moves #'rank< :key #'move-rank))
@@ -905,9 +908,9 @@ plates (it will be loose); else nil."
                                                  lead))))
             (when (group-clear-p gridded others) gridded))))))
 
-(defun drop-spec (spec others &rest keys &key reach free?)
+(defun drop-spec (spec others &rest keys &key reach free? onto)
   "The spec as drop-group lands it alone, or nil."
-  (declare (ignore reach free?))
+  (declare (ignore reach free? onto))
   (first (apply #'drop-group (list spec) others keys)))
 
 ;;
@@ -1052,22 +1055,38 @@ on the moving part and on something else stays."
         (when (zerop (dot (axis up) (axis rear))) (push (list up rear) result)))))
   "List of the 24 (up rear) pairs.")
 
-(defun fit-spec (spec others &key (reach 40))
-  "The spec snapped onto the build in whichever of the 24 orientations
-needs the shortest move, its own orientation winning a tie; nil when none
-snaps within reach."
+(defun fit-spec (spec others &key (reach 40) onto)
+  "The spec snapped onto the build (onto that spec alone, when given) in
+whichever of the 24 orientations needs the shortest move, its own
+orientation winning a tie; nil when none snaps within reach."
   (let ((own (list (spec-up spec) (spec-rear spec))) best best-distance)
     (dolist (orientation (cons own (remove own *orientations* :test #'equal)) best)
       (let* ((turned (let ((new (copy-list spec)))
                        (remf new :matrix)
                        (setf (getf new :up) (first orientation) (getf new :rear) (second orientation))
                        new))
-             (dropped (drop-spec turned others :reach reach :free? nil)))
+             (dropped (drop-spec turned others :reach reach :free? nil :onto onto)))
         (when dropped
           (let* ((move (v- (spec-at dropped) (spec-at spec)))
                  (distance (sqrt (dot move move))))
             (when (or (null best) (< distance best-distance))
               (setf best dropped best-distance distance))))))))
+
+(defun studless-p (spec)
+  "True for a part that joins only by pins, axles and their holes: nothing
+sets which way up it goes, so it may turn to fit where it is dropped."
+  (notany #'(lambda (c) (member (connector-kind c) '(:stud :socket))) (world-connectors spec)))
+
+(defun drag-group (group others)
+  "List. The group of specs as it lands when dragged and let go: as
+drop-group lands it, except that a studless part alone, which no joint
+takes as it stands, turns to the nearest joint that takes it before it
+is left loose."
+  (or (drop-group group others :free? nil)
+      (when (and (null (rest group)) (studless-p (first group)))
+        (let ((fitted (fit-spec (first group) others)))
+          (when fitted (list fitted))))
+      (drop-group group others)))
 
 ;;
 ;; Part ids: an editor names parts by id, which survives the removal of

@@ -285,7 +285,10 @@ nil when there is none."
                                          (round (+ (second (first extent)) (second (second extent))) 2)
                                          (third (second extent))))
                                  (list 0 0 0)))
-                      (placed (or (and specs (fit-spec (move-spec new start) specs))
+                      ;; anywhere on the selected part first: the free end
+                      ;; of a long axle is far from its middle
+                      (placed (or (and near (fit-spec (move-spec new start) specs :onto near :reach 10000))
+                                  (and specs (fit-spec (move-spec new start) specs))
                                   (if specs (clear-spot new specs) (move-spec new '(0 0 0))))))
                  (funcall store (append specs (list placed)))
                  (reply assembly :changed (list new-id))))))
@@ -330,13 +333,13 @@ nil when there is none."
                 (ids (mapcar #'spec-id group))
                 (others (remove-if #'(lambda (s) (member (spec-id s) ids)) specs))
                 (about (cdr (assoc op '(("turn" . :z) ("tilt" . :x) ("roll" . :y)) :test #'string=)))
+                (shifted (unless about
+                           (shift-specs group (mapcar #'(lambda (k) (round (read-number (funcall param k))))
+                                                      '("dx" "dy" "dz")))))
                 (dropped
-                  (if about
-                      (drop-group (turn-group group about) others)
-                      (drop-group (shift-specs group (mapcar #'(lambda (k) (round (read-number (funcall param k))))
-                                                             '("dx" "dy" "dz")))
-                                  others
-                                  :reach (if (string= (or (funcall param "exact") "") "1") 0 40)))))
+                  (cond (about (drop-group (turn-group group about) others))
+                        ((string= (or (funcall param "exact") "") "1") (drop-group shifted others :reach 0))
+                        (t (drag-group shifted others)))))
            (if dropped
                (progn
                  (funcall store (mapcar #'(lambda (s) (or (find (spec-id s) dropped :key #'spec-id) s)) specs))

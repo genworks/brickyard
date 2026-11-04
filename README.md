@@ -30,11 +30,14 @@ its own address, `/brickyard?b=<id>`, and keeps it in
 `/projects/.state/brickyard-<id>.sexp`, so the address keeps working
 across restarts.
 
-- Click a part in the bin to add it: onto the selected part when it
-  fits there (in whichever orientation needs the least moving), off to
-  the side otherwise.
+- Click a part in the bin to add it: anywhere on the selected part
+  that it fits (a gear finds the free end of a long axle), in whichever
+  orientation needs the least moving; failing that onto what is near,
+  and off to the side otherwise.
 - Drag a part to slide it across the build; on release it drops onto
   the nearest place it fits, landing on top before going underneath.
+  A part with no studs or sockets (a gear, a beam, a pin) turns to fit
+  when nothing takes it as it stands.
 - A part moves with what it carries: whatever rests on it and nothing
   else (a plate bridging it and a neighbor stays), and whatever hangs
   from those (a beam on pins, a wheel on an axle) without standing on
