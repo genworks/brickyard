@@ -39,7 +39,8 @@
     ("Tiles" (:tile (1 2)) (:tile (2 2)))
     ("Technic" (:technic-brick (4)) (:technic-brick (8)) (:technic-brick (16))
      (:beam (3)) (:beam (5)) (:beam (7)) (:beam (9)) (:beam (15))
-     (:axle (3)) (:axle (4)) (:axle (6)) (:axle (8)) (:axle (12)) (:pin nil)))
+     (:axle (3)) (:axle (4)) (:axle (6)) (:axle (8)) (:axle (12)) (:pin nil))
+    ("Robot" (:wheel (3 1)) (:wheel (4 2)) (:wheel (5 2)) (:wheel (7 3)) (:motor nil) (:controller nil)))
   "List of (heading (type size) ...) for the page's parts bin.")
 
 (defparameter *colors*
@@ -122,10 +123,19 @@ nil when there is none."
   (format nil "~:(~a~)~@[ ~a~]"
           (substitute #\Space #\- (string type))
           (case type
-            (:brick (format nil "~ax~a~:[~;~:*x~a/3~]" (first size) (second size)
-                            (unless (= (third size) 3) (third size))))
-            ((:plate :tile :technic-brick) (format nil "~ax~a" (first size) (second size)))
+            (:brick (destructuring-bind (w l h) size
+                      (cond ((= h 3) (format nil "~ax~a" w l))
+                            ((zerop (mod h 3)) (format nil "~ax~ax~a" w l (/ h 3)))
+                            (t (format nil "~ax~a, ~a plates high" w l h)))))
+            ((:plate :tile :technic-brick :wheel) (format nil "~ax~a" (first size) (second size)))
             ((:beam :axle) (format nil "~a" (first size))))))
+
+(defun bin-label (type size)
+  (case type
+    (:pin "Pin") (:motor "Motor") (:controller "Controller")
+    (t (format nil "~:[~;~:*~a ~]~{~a~^x~}"
+               (case type (:beam "Beam") (:axle "Axle") (:technic-brick "Tech") (:wheel "Wheel"))
+               size))))
 
 (defun status-json (assembly)
   (let* ((specs (the-object assembly part-specs))
@@ -137,6 +147,10 @@ nil when there is none."
                                  (the-object assembly collisions))
                          'vector)
      :loose (coerce (mapcar id-of (the-object assembly loose)) 'vector)
+     :drives (coerce (mapcar #'(lambda (pair) (coerce (mapcar id-of pair) 'vector))
+                             (the-object assembly drives))
+                     'vector)
+     :ground (coerce (mapcar id-of (the-object assembly ground-contacts)) 'vector)
      :bom (coerce (mapcar #'(lambda (entry)
                               (destructuring-bind (count type size color) entry
                                 (json-object :count count :color (string-downcase color)
@@ -193,7 +207,8 @@ nil when there is none."
          (reply assembly :changed (mapcar #'spec-id specs)))
 
         ((string= op "add")
-         (let* ((type (read-keyword (funcall param "type") '(:brick :plate :tile :technic-brick :beam :axle :pin)))
+         (let* ((type (read-keyword (funcall param "type") '(:brick :plate :tile :technic-brick :beam :axle :pin
+                                                              :wheel :motor :controller)))
                 (size (read-size (funcall param "size")))
                 (color (read-keyword (funcall param "color") *colors*))
                 (near (let ((v (funcall param "near"))) (and v (find (read-number v) specs :key #'spec-id))))
@@ -268,6 +283,7 @@ nil when there is none."
       (:header (:h1 "Brickyard")
        (:span :id "build-name" (cl-who:str build-id))
        (:a :href "/brickyard?new=1" "New build")
+       (:a :href "/brickyard?new=robot" "Robot build")
        (:a :href "/brickyard?new=empty" "Empty build"))
       (:main
        (:aside :id "bin"
@@ -280,10 +296,7 @@ nil when there is none."
                 (cl-who:htm
                  (:button :class "part" :data-type (string-downcase type)
                           :data-size (format nil "~{~a~^ ~}" size)
-                          (cl-who:str (if (eql type :pin) "Pin"
-                                          (format nil "~:[~;~:*~a ~]~{~a~^x~}"
-                                                  (case type (:beam "Beam") (:axle "Axle") (:technic-brick "Tech"))
-                                                  size))))))))))
+                          (cl-who:str (bin-label type size)))))))))
         (:h2 "Color")
         (:div :class "bin-row" :id "swatches"
          (dolist (color *colors*)
@@ -338,7 +351,9 @@ an empty group the parts go into."
     (cond (new
            (redirect req ent (format nil "/brickyard?b=~a"
                                      (bt:with-lock-held (*builds-lock*)
-                                       (make-build :specs (if (string= new "empty") nil *sample-build*))))))
+                                       (make-build :specs (cond ((string= new "empty") nil)
+                                                                ((string= new "robot") *robot-build*)
+                                                                (t *sample-build*)))))))
           ((and id (bt:with-lock-held (*builds-lock*) (find-build id)))
            (respond req ent "text/html; charset=utf-8" (page-html id)))
           (t (redirect req ent "/brickyard?new=1")))))

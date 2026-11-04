@@ -114,8 +114,20 @@
       lines.push(status.collisions.length + ' overlapping: ' + status.collisions.map(function (p) { return p.join('/'); }).join(', '));
     if (status.loose.length)
       lines.push(status.loose.length + ' loose: ' + status.loose.join(', '));
+    const warnings = lines.length;
+    const name = function (id) { const p = parts.get(id); return (p ? p.label : 'part') + ' (' + id + ')'; };
+    const byMotor = new Map();
+    status.drives.forEach(function (pair) {
+      if (!byMotor.has(pair[0])) byMotor.set(pair[0], []);
+      byMotor.get(pair[0]).push(pair[1]);
+    });
+    byMotor.forEach(function (wheels, motor) {
+      lines.push(name(motor) + ' drives ' + wheels.map(name).join(', '));
+    });
+    if (status.ground.length)
+      lines.push('Stands on ' + status.ground.map(name).join(', '));
     document.getElementById('summary').innerHTML = lines.map(function (l, i) {
-      return '<p class="' + (i === 0 ? '' : 'warn') + '">' + l + '</p>';
+      return '<p class="' + (i === 0 || i >= warnings ? '' : 'warn') + '">' + l + '</p>';
     }).join('');
     document.getElementById('bom').innerHTML = status.bom.map(function (row) {
       return '<tr><td>' + row.count + '</td><td><span class="chip" title="' + row.color + '" data-color="' +

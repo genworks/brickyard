@@ -23,7 +23,8 @@
 ;; A spec:  (:type :brick :size (2 4) :at (0 0 0) :up :top :rear :rear :color :red)
 ;;
 ;; :type   :brick (w l [plates-high, default 3]), :plate (w l), :tile (w l),
-;;         :technic-brick (l), :beam (holes), :axle (studs long), :pin ()
+;;         :technic-brick (l), :beam (holes), :axle (studs long), :pin (),
+;;         :wheel (d [w, default 2]), :motor (), :controller ()
 ;; :at     the part's anchor in LDU: the center of the bottom face for
 ;;         bricks, plates and tiles, the middle of the part otherwise
 ;; :up :rear   where the part's own :top and :rear face, as axis keywords
@@ -42,7 +43,8 @@ still pull the part onto it (three studs).")
 
 (defparameter *default-colors*
   '(:brick :red :plate :blue :tile :yellow :technic-brick :grey
-    :beam :grey-light :axle :black :pin :black))
+    :beam :grey-light :axle :black :pin :black
+    :wheel :grey-light :motor :grey-light :controller :white))
 
 (defun mm (ldu) (* ldu *mm-per-ldu*))
 
@@ -101,7 +103,8 @@ brick family, (n) for beams and axles, () for a pin."
       ((:plate :tile) (list (first size) (second size) 1))
       (:technic-brick (list 1 (first size) 3))
       ((:beam :axle) (list (first size)))
-      (:pin nil))))
+      (:wheel (list (first size) (or (second size) 2)))
+      ((:pin :motor :controller) nil))))
 
 (defun move-spec (spec at)
   (let ((new (copy-list spec))) (setf (getf new :at) at) new))
@@ -118,34 +121,60 @@ brick family, (n) for beams and axles, () for a pin."
   "LDU from the middle of a row of n places, 20 apart, to place j."
   (- (* 20 j) (* 10 (1- n))))
 
+(defun grid-connectors (kind w l z dir &key (rows (iota l)))
+  "List of connectors of kind on a w by l stud grid at height z, in the given rows only."
+  (let (result)
+    (dotimes (i w (nreverse result))
+      (dolist (j rows)
+        (push (make-connector :kind kind :point (list (row-offset i w) (row-offset j l) z) :dir dir)
+              result)))))
+
+(defun hole-row (kind x ys z dir half)
+  (mapcar #'(lambda (y) (make-connector :kind kind :point (list x y z) :dir dir :half half)) ys))
+
+;;
+;; The robot parts are this program's own, sized to the stud grid:
+;;
+;; :wheel (d w)   a tire d studs across and w wide on a hub with an axle
+;;                hole along its own :rear; the anchor is its middle
+;; :motor         a body 2 by 4 studs and two bricks high, studs on top,
+;;                sockets below, three pin holes across it, and an output
+;;                hub one stud proud of its :rear end that takes an axle
+;; :controller    a body 4 by 6 studs and two bricks high, sockets below,
+;;                studs on its two end rows, a screen and four ports, and
+;;                a row of pin holes into each long side
+;;
+
 (defun local-connectors (spec)
   (let ((size (spec-size spec)) (type (spec-type spec)))
     (ecase type
       ((:brick :plate :tile :technic-brick)
        (destructuring-bind (w l h) size
-         (let (result)
-           (dotimes (i w)
-             (dotimes (j l)
-               (let ((x (row-offset i w)) (y (row-offset j l)))
-                 (unless (eql type :tile)
-                   (push (make-connector :kind :stud :point (list x y (* 8 h)) :dir '(0 0 1)) result))
-                 (push (make-connector :kind :socket :point (list x y 0) :dir '(0 0 -1)) result))))
-           (when (eql type :technic-brick)
-             (dotimes (j (1- l))
-               (push (make-connector :kind :pin-hole :point (list 0 (row-offset j (1- l)) 14)
-                                     :dir '(1 0 0) :half 10)
-                     result)))
-           (nreverse result))))
+         (append (unless (eql type :tile) (grid-connectors :stud w l (* 8 h) '(0 0 1)))
+                 (grid-connectors :socket w l 0 '(0 0 -1))
+                 (when (eql type :technic-brick)
+                   (hole-row :pin-hole 0 (mapcar #'(lambda (j) (row-offset j (1- l))) (iota (1- l)))
+                             14 '(1 0 0) 10)))))
       (:beam
        (let ((n (first size)))
-         (mapcar #'(lambda (j) (make-connector :kind :pin-hole :point (list 0 (row-offset j n) 0)
-                                               :dir '(1 0 0) :half 9))
-                 (iota n))))
+         (hole-row :pin-hole 0 (mapcar #'(lambda (j) (row-offset j n)) (iota n)) 0 '(1 0 0) 9)))
       (:axle
        (list (make-connector :kind :axle :point '(0 0 0) :dir '(0 1 0) :half (* 10 (first size)))))
       (:pin
        (list (make-connector :kind :pin :point '(0 -10 0) :dir '(0 1 0) :half 10)
-             (make-connector :kind :pin :point '(0 10 0) :dir '(0 1 0) :half 10))))))
+             (make-connector :kind :pin :point '(0 10 0) :dir '(0 1 0) :half 10)))
+      (:wheel
+       (list (make-connector :kind :axle-hole :point '(0 0 0) :dir '(0 1 0) :half (* 10 (second size)))))
+      (:motor
+       (append (grid-connectors :stud 2 4 48 '(0 0 1))
+               (grid-connectors :socket 2 4 0 '(0 0 -1))
+               (hole-row :pin-hole 0 '(-20 0 20) 24 '(1 0 0) 20)
+               (list (make-connector :kind :axle-hole :point '(0 50 24) :dir '(0 1 0) :half 10))))
+      (:controller
+       (append (grid-connectors :stud 4 6 48 '(0 0 1) :rows '(0 5))
+               (grid-connectors :socket 4 6 0 '(0 0 -1))
+               (hole-row :pin-hole -30 (mapcar #'(lambda (j) (row-offset j 6)) (iota 6)) 24 '(1 0 0) 10)
+               (hole-row :pin-hole 30 (mapcar #'(lambda (j) (row-offset j 6)) (iota 6)) 24 '(1 0 0) 10))))))
 
 (defun local-extent (spec)
   "List of two corners, low and high, of the part's own box in LDU, studs left out."
@@ -156,7 +185,40 @@ brick family, (n) for beams and axles, () for a pin."
          (list (list (* -10 w) (* -10 l) 0) (list (* 10 w) (* 10 l) (* 8 h)))))
       (:beam (let ((y (+ (* 10 (1- (first size))) 9))) (list (list -9 (- y) -9) (list 9 y 9))))
       (:axle (let ((y (* 10 (first size)))) (list (list -6 (- y) -6) (list 6 y 6))))
-      (:pin (list '(-6 -20 -6) '(6 20 6))))))
+      (:pin (list '(-6 -20 -6) '(6 20 6)))
+      (:wheel (destructuring-bind (d w) size
+                (list (list (* -10 d) (* -10 w) (* -10 d)) (list (* 10 d) (* 10 w) (* 10 d)))))
+      (:motor (list '(-20 -40 0) '(20 60 48)))
+      (:controller (list '(-40 -60 0) '(40 60 48))))))
+
+;;
+;; What a robot build is asked: which motor turns which wheel, and what
+;; it stands on.
+;;
+
+(defun drives (specs)
+  "List of (motor wheel) index pairs: a wheel on an axle held in a motor's output."
+  (let ((indexed (mapcar #'cons (iota (length specs)) specs)) result)
+    (flet ((of-type (type) (remove type indexed :key #'(lambda (e) (spec-type (rest e))) :test-not #'eql))
+           (held-p (a b &optional (kind nil kind?))
+             (some #'(lambda (ca)
+                       (and (or (not kind?) (eql (connector-kind ca) kind))
+                            (some #'(lambda (cb) (mate-p ca cb)) (world-connectors b))))
+                   (world-connectors a))))
+      (dolist (motor (of-type :motor) (nreverse result))
+        (dolist (axle (of-type :axle))
+          (when (held-p (rest motor) (rest axle) :axle-hole)
+            (dolist (wheel (of-type :wheel))
+              (when (held-p (rest axle) (rest wheel))
+                (push (list (first motor) (first wheel)) result)))))))))
+
+(defun ground-contacts (specs &key (tolerance 2))
+  "List of indices of the parts whose lowest point is within tolerance LDU of the build's."
+  (when specs
+    (let* ((lows (mapcar #'(lambda (s) (third (first (world-extent s)))) specs))
+           (lowest (reduce #'min lows)))
+      (remove nil (mapcar #'(lambda (i z) (when (<= (- z lowest) tolerance) i))
+                          (iota (length specs)) lows)))))
 
 (defun world-connectors (spec)
   (let ((rows (part-rotation (spec-up spec) (spec-rear spec))) (at (spec-at spec)))
@@ -291,7 +353,7 @@ how far up or down."
   "The spec as it lands when let go where it stands: onto the clear joint
 nearest in plan within reach LDU, any height, landing on top before going
 underneath; failing that, when free? and it is clear where it is, left
-there on a 10 LDU grid (it will be loose); else nil."
+there on a grid of half studs and plates (it will be loose); else nil."
   (let* ((spec (move-spec spec (mapcar #'round (spec-at spec))))
          (moves (remove-if #'(lambda (m) (> (first (move-rank m)) reach))
                            (mapcar #'rest (snap-moves spec others)))))
@@ -299,7 +361,8 @@ there on a 10 LDU grid (it will be loose); else nil."
           (let ((moved (move-spec spec (v+ (spec-at spec) move))))
             (unless (collides-with-any-p moved others) (return moved))))
         (when free?
-          (let ((gridded (move-spec spec (mapcar #'(lambda (x) (* 10 (round x 10))) (spec-at spec)))))
+          (let ((gridded (move-spec spec (destructuring-bind (x y z) (spec-at spec)
+                                           (list (* 10 (round x 10)) (* 10 (round y 10)) (* 8 (round z 8)))))))
             (unless (collides-with-any-p gridded others) gridded))))))
 
 ;;

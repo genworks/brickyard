@@ -20,6 +20,19 @@
   "List of specs. A small chassis: two Technic bricks tied by a plate,
 an axle through both, and a beam pinned to one side.")
 
+(defparameter *robot-build*
+  '((:type :motor :at (-60 0 0) :rear :left)
+    (:type :motor :at (60 0 0) :rear :right)
+    (:type :plate :size (10 6) :color :blue :at (0 0 48))
+    (:type :controller :at (0 0 56))
+    (:type :axle :size (4) :at (-140 0 24) :rear :right)
+    (:type :axle :size (4) :at (140 0 24) :rear :right)
+    (:type :wheel :size (5 2) :at (-150 0 24) :rear :right)
+    (:type :wheel :size (5 2) :at (150 0 24) :rear :right)
+    (:type :brick :size (2 2 9) :color :black :at (0 40 -24)))
+  "List of specs. A drive base: two motors under a plate, each turning a
+wheel on an axle, the controller on top, and a skid at the front.")
+
 
 (define-object assembly (base-object)
   :documentation (:description "A build: the parts its specs name, and what holds them together.")
@@ -34,6 +47,13 @@ an axle through both, and a beam pinned to one side.")
    (groups (groups (length (the part-specs)) (the connections)))
    ("List of indices. Parts not held, through any chain of joints, to the first part."
     loose (sort (apply #'append (rest (the groups))) #'<))
+   ("List of (motor wheel) index pairs: each wheel a motor turns."
+    drives (drives (the part-specs)))
+   ("List of indices. The parts the build stands on, loose parts left out."
+    ground-contacts (let ((held (remove-if #'(lambda (i) (member i (the loose)))
+                                           (iota (length (the part-specs))))))
+                      (mapcar #'(lambda (k) (nth k held))
+                              (ground-contacts (mapcar #'(lambda (i) (nth i (the part-specs))) held)))))
    ("List of (count type size color), most numerous first."
     bill-of-materials
     (let (counts)

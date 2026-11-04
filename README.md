@@ -59,6 +59,17 @@ goes to the server, which answers with the parts that changed.
 | `:beam` | `(holes)`: studless | the middle hole |
 | `:axle` | `(studs-long)` | its middle |
 | `:pin` | none: two studs long | its collar |
+| `:wheel` | `(d [w])`: d studs across, w wide (2 by default) | its middle |
+| `:motor` | none: 2 by 4 studs, two bricks high, output hub at its rear | center of the bottom face |
+| `:controller` | none: 4 by 6 studs, two bricks high | center of the bottom face |
+
+The wheel, motor and controller are this program's own designs, sized
+to the stud grid.  A wheel has an axle hole through its hub; a motor
+has studs on top, sockets below, pin holes across it and an output hub
+that holds an axle; a controller has studs on its two end rows, a
+screen, four ports and pin holes down both long sides.  The build
+reports which motor drives which wheel (motor output, axle, wheel) and
+which parts it stands on.  `?new=robot` opens a small drive base.
 
 Positions are whole LDraw units (LDU): a stud pitch is 20, a plate 8,
 a brick 24; one LDU is 0.4 mm.  Axes follow Gendl: X `:right`, Y

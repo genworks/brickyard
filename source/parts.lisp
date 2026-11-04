@@ -24,7 +24,8 @@
   ((part-type (spec-type (the spec)))
    (size (spec-size (the spec)))
    (stud-connectors (remove :stud (local-connectors (the spec)) :key #'connector-kind :test-not #'eql))
-   (hole-connectors (remove :pin-hole (local-connectors (the spec)) :key #'connector-kind :test-not #'eql)))
+   (hole-connectors (remove-if-not #'(lambda (kind) (member kind '(:pin-hole :axle-hole)))
+                                   (local-connectors (the spec)) :key #'connector-kind)))
 
   :objects
   ((studs :type 'cylinder
@@ -35,7 +36,8 @@
           :orientation (alignment :rear (the (face-normal-vector :top)))
           :display-controls (the display-controls))
 
-   (holes :type 'cylinder
+   (holes :type (:sequence (mapcar #'(lambda (c) (if (eql (connector-kind c) :axle-hole) 'axle-hole-mark 'cylinder))
+                                   (the hole-connectors)))
           :sequence (:size (length (the hole-connectors)))
           :pseudo-inputs (connector)
           :connector (nth (the-child index) (the hole-connectors))
@@ -108,9 +110,75 @@
    (collar :type 'cylinder :radius 3.0 :length 0.8 :display-controls (the display-controls))))
 
 
+(define-object axle-hole-mark (base-object)
+  :documentation (:description "An axle hole: a dark cross through the part, along its own :rear.")
+
+  :input-slots (length (radius 2.5))
+
+  :objects
+  ((arms :type 'box
+         :sequence (:size 2)
+         :width (if (zerop (the-child index)) 4.9 1.9)
+         :height (if (zerop (the-child index)) 1.9 4.9)
+         :length (the length)
+         :display-controls (the display-controls))))
+
+
+(define-object wheel (part-mixin)
+  :documentation (:description "A wheel: a black tire on a hub of the part's color, turning on an axle along its own :rear.")
+
+  :computed-slots
+  ((diameter (* 8 (first (the size))))
+   (width (* 8 (second (the size)))))
+
+  :objects
+  ((tire :type 'cylinder
+         :radius (- (half (the diameter)) 0.1) :length (- (the width) 0.4)
+         :display-controls (list :color :black))
+   (hub :type 'cylinder
+        :radius (max 4.0 (* 0.3 (the diameter))) :length (- (the width) 0.1)
+        :display-controls (the display-controls))))
+
+
+(define-object motor (part-mixin)
+  :documentation (:description "A motor: a studded body two bricks high and an output hub that turns an axle.")
+
+  :objects
+  ((body :type 'box
+         :width 15.8 :length 31.8 :height 19.2
+         :center (the (local-point '(0 0 24)))
+         :display-controls (the display-controls))
+   (output :type 'cylinder
+           :radius 3.6 :length 7.8
+           :center (the (local-point '(0 50 24)))
+           :display-controls (list :color :orange))))
+
+
+(define-object controller (part-mixin)
+  :documentation (:description "A controller: a body two bricks high with a screen on top, four ports at the front and pin holes down both sides.")
+
+  :objects
+  ((body :type 'box
+         :width 31.8 :length 47.8 :height 19.2
+         :center (the (local-point '(0 0 24)))
+         :display-controls (the display-controls))
+   (screen :type 'box
+           :width 22.0 :length 22.0 :height 0.4
+           :center (the (local-point '(0 0 48) :up 0.2))
+           :display-controls (list :color :grey-slate-dark))
+   (ports :type 'box
+          :sequence (:size 4)
+          :width 5.0 :length 0.4 :height 4.0
+          :center (the (local-point (list (row-offset (the-child index) 4) -60 24) :up 0))
+          :display-controls (list :color :black))))
+
+
 (defun part-class (spec)
   (ecase (spec-type spec)
     ((:brick :plate :tile :technic-brick) 'brick)
     (:beam 'beam)
     (:axle 'axle)
-    (:pin 'pin)))
+    (:pin 'pin)
+    (:wheel 'wheel)
+    (:motor 'motor)
+    (:controller 'controller)))
