@@ -550,19 +550,107 @@ an empty group the parts go into."
         (setf *gate* (uiop:symbol-call :invite-gate :make-gate
                                        :name "Brickyard" :prefix "/brickyard" :cookie "brickyard_invite")))))
 
-(defun gated (handler)
-  "A publish function that answers through handler only what the gate admits."
+;; A kept-alive reply first reads the whole request body, as one string
+;; of four bytes a character on SBCL, outside any handler: a large POST
+;; exhausts the heap and leaves its worker in the debugger for good, and
+;; it needs no invite to do it.  So every door here looks at what a
+;; request declares before anything reads it, and a refusal closes the
+;; connection instead of keeping it alive.  These are here as well as in
+;; invite-gate because the images carry a compiled invite-gate until they
+;; are rebuilt.
+
+(defparameter *body-limit* 65536
+  "Integer. The most bytes a door takes unless it says otherwise: an operation or a prompt is small.")
+
+(defparameter *drained-body-bytes* 1000000
+  "Integer. How much of a refused body is read and dropped, so that an
+ordinary POST gets its answer.  A larger one is closed on.")
+
+(defparameter *response-payload-too-large* (net.aserve::make-resp 413 "Payload Too Large"))
+
+(defun declared-length (req)
+  "The length req declares, or nil for none or one that cannot be read."
+  (let ((declared (net.aserve:header-slot-value req :content-length)))
+    (and declared (ignore-errors (parse-integer declared)))))
+
+(defun body-within-p (req limit)
+  "True when req's body, if it has one, declares a length within limit."
+  (let ((declared (net.aserve:header-slot-value req :content-length)))
+    (cond ((net.aserve:header-slot-value req :transfer-encoding) nil)
+          ((null declared) t)
+          (t (let ((length (declared-length req))) (and length (<= 0 length limit)))))))
+
+(defun close-after-reply! (req)
+  "Called inside with-http-response: the connection closes after this
+reply, so the request's body is not read first."
+  (setf (net.aserve::request-reply-strategy req)
+        (remove :keep-alive (net.aserve::request-reply-strategy req))))
+
+(defun drain-body! (req)
+  "Read and drop req's body when nothing has read it and it declares at
+most *drained-body-bytes*.  Closing with bytes unread resets the
+connection, and the reset can reach the client ahead of the reply."
+  (let ((declared (declared-length req)))
+    (when (and declared (<= 0 declared *drained-body-bytes*)
+               (null (net.aserve::request-request-body req)))
+      (handler-case
+          (let ((scratch (make-array 65536 :element-type '(unsigned-byte 8)))
+                (socket (net.aserve:request-socket req))
+                (left declared))
+            (setf (net.aserve::request-request-body req) "")
+            (when (net.aserve::request-has-continue-expectation req)
+              (net.aserve::send-100-continue req))
+            (loop while (plusp left)
+                  do (let ((got (glisp:with-deadline (10)
+                                  (read-sequence scratch socket :end (min left (length scratch))))))
+                       (when (zerop got) (return))
+                       (decf left got))))
+        (serious-condition () nil)))))
+
+(defun refuse-closing (req ent response content-type text)
+  "Answer text with response, the request's body unread beyond what is drained."
+  (drain-body! req)
+  (net.aserve:with-http-response (req ent :content-type content-type :response response)
+    (close-after-reply! req)
+    (net.aserve:with-http-body (req ent)
+      (write-string text (net.aserve:request-reply-stream req)))))
+
+(defun refuse-visitor (req ent)
+  "The gate's private-beta page, a 403."
+  (refuse-closing req ent net.aserve:*response-forbidden* "text/html"
+                  (uiop:symbol-call :invite-gate :refusal-page (gate))))
+
+(defun refuse-body (req ent limit)
+  (refuse-closing req ent *response-payload-too-large* "application/json"
+                  (with-output-to-string (s)
+                    (yason:encode (json-object :ok nil :message (format nil "That is more than Brickyard takes here (~:d bytes)." limit))
+                                  s))))
+
+(defun gated (handler &key (limit *body-limit*))
+  "A publish function that answers through handler only a body within
+limit, and only what the gate admits.  The size comes first: asking
+the gate looks for ?invite=, and looking reads a form-encoded body."
   #'(lambda (req ent)
       (let ((gate (gate)))
-        (cond ((null gate) (funcall handler req ent))
-              ((uiop:symbol-call :invite-gate :invite-allowed? gate req)
-               (uiop:symbol-call :invite-gate :ensure-invite-cookie! gate req)
-               (funcall handler req ent))
-              (t (uiop:symbol-call :invite-gate :refuse gate req ent))))))
+        (cond ((not (body-within-p req limit)) (refuse-body req ent limit))
+              ((and gate (not (uiop:symbol-call :invite-gate :invite-allowed? gate req)))
+               (refuse-visitor req ent))
+              (t (when gate (uiop:symbol-call :invite-gate :ensure-invite-cookie! gate req))
+                 (funcall handler req ent))))))
 
 (defun publish-invite-door (server)
+  "Publish /brickyard/invite/<token>.  The door is a link, so a body is no
+business of it; its own refusal would keep alive and read one."
   (when (gate)
-    (uiop:symbol-call :invite-gate :publish-invite-door (gate) :server server)))
+    (let ((prefix "/brickyard/invite/"))
+      (net.aserve:publish-prefix
+       :prefix prefix :server server
+       :function #'(lambda (req ent)
+                     (if (and (body-within-p req 0) (member (declared-length req) '(nil 0)))
+                         (uiop:symbol-call :invite-gate :invite-door (gate) req ent
+                                           (subseq (net.uri:uri-path (net.aserve:request-uri req))
+                                                   (length prefix)))
+                         (refuse-visitor req ent)))))))
 
 (defun private-beta (invites-file public-base)
   "Close the gate to all but the invites in invites-file, whose links start with public-base."
@@ -581,7 +669,8 @@ an empty group the parts go into."
   (net.aserve:publish :path "/brickyard/api/prompt" :server server :function (gated 'prompt-handler))
   (net.aserve:publish :path "/brickyard/api/reference" :server server :function (gated 'reference-handler))
   (net.aserve:publish :path "/brickyard/export" :server server :function (gated #'export-handler))
-  (net.aserve:publish :path "/brickyard/import" :server server :function (gated #'import-handler))
+  (net.aserve:publish :path "/brickyard/import" :server server
+                      :function (gated #'import-handler :limit (getf *ldraw-limits* :bytes)))
   (net.aserve:publish-directory :prefix "/brickyard/static/" :server server
                                 :destination (namestring *static-directory*))
   (publish-invite-door server))
