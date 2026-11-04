@@ -36,11 +36,13 @@
 (defparameter *palette*
   '(("Bricks" (:brick (1 1)) (:brick (1 2)) (:brick (1 4)) (:brick (2 2)) (:brick (2 4)) (:brick (2 6)))
     ("Plates" (:plate (1 2)) (:plate (1 4)) (:plate (2 2)) (:plate (2 4)) (:plate (2 8)) (:plate (4 8)) (:plate (6 10)))
-    ("Tiles" (:tile (1 2)) (:tile (2 2)))
+    ("Tiles" (:tile (1 2)) (:tile (2 2)) (:round-tile nil))
     ("Technic" (:technic-brick (4)) (:technic-brick (8)) (:technic-brick (16))
-     (:beam (3)) (:beam (5)) (:beam (7)) (:beam (9)) (:beam (15))
-     (:axle (3)) (:axle (4)) (:axle (6)) (:axle (8)) (:axle (12)) (:pin nil)
+     (:beam (1)) (:beam (3)) (:beam (5)) (:beam (7)) (:beam (9)) (:beam (15)) (:l-beam (3 5))
+     (:axle (2)) (:axle (3)) (:axle (4)) (:axle (6)) (:axle (8)) (:axle (12))
      (:gear (8)) (:gear (16)) (:gear (24)) (:gear (40)))
+    ("Connectors" (:pin (2)) (:pin (3)) (:half-pin nil) (:axle-pin (1)) (:axle-pin (2))
+     (:bush nil) (:cross-block (2)) (:cross-block (3)))
     ("Robot" (:wheel (3 1)) (:wheel (4 2)) (:wheel (5 2)) (:wheel (7 3)) (:motor nil) (:controller nil)))
   "List of (heading (type size) ...) for the page's parts bin.")
 
@@ -121,19 +123,30 @@ nil when there is none."
 
 (defun part-label (type size)
   "String naming a part the way the bin does: Brick 2x4, Technic brick 1x8, Beam 5."
-  (format nil "~:(~a~)~@[ ~a~]"
-          (substitute #\Space #\- (string type))
-          (case type
-            (:brick (destructuring-bind (w l h) size
-                      (cond ((= h 3) (format nil "~ax~a" w l))
-                            ((zerop (mod h 3)) (format nil "~ax~ax~a" w l (/ h 3)))
-                            (t (format nil "~ax~a, ~a plates high" w l h)))))
-            ((:plate :tile :technic-brick :wheel) (format nil "~ax~a" (first size) (second size)))
-            ((:beam :axle :gear) (format nil "~a" (first size))))))
+  (case type
+    (:pin (if (eql (first size) 3) "Pin 3" "Pin"))
+    (:half-pin "Half pin")
+    (:axle-pin (if (eql (first size) 2) "Axle-pin with 2L pin" "Axle-pin"))
+    (:cross-block (format nil "Cross block 1x~a" (first size)))
+    (:l-beam "L-beam 3x5")
+    (:round-tile "Round tile 1x1")
+    (t (format nil "~:(~a~)~@[ ~a~]"
+               (substitute #\Space #\- (string type))
+               (case type
+                 (:brick (destructuring-bind (w l h) size
+                           (cond ((= h 3) (format nil "~ax~a" w l))
+                                 ((zerop (mod h 3)) (format nil "~ax~ax~a" w l (/ h 3)))
+                                 (t (format nil "~ax~a, ~a plates high" w l h)))))
+                 ((:plate :tile :technic-brick :wheel) (format nil "~ax~a" (first size) (second size)))
+                 ((:beam :axle :gear) (format nil "~a" (first size))))))))
 
 (defun bin-label (type size)
   (case type
-    (:pin "Pin") (:motor "Motor") (:controller "Controller")
+    (:pin (if (eql (first size) 3) "Pin 3" "Pin"))
+    (:half-pin "Half pin") (:bush "Bush") (:round-tile "Round 1x1") (:l-beam "L 3x5")
+    (:axle-pin (if (eql (first size) 2) "Axle-pin 2" "Axle-pin"))
+    (:cross-block (format nil "Cross 1x~a" (first size)))
+    (:motor "Motor") (:controller "Controller")
     (t (format nil "~:[~;~:*~a ~]~{~a~^x~}"
                (case type (:beam "Beam") (:axle "Axle") (:technic-brick "Tech") (:wheel "Wheel") (:gear "Gear"))
                size))))
@@ -215,7 +228,8 @@ nil when there is none."
 
         ((string= op "add")
          (let* ((type (read-keyword (funcall param "type") '(:brick :plate :tile :technic-brick :beam :axle :pin
-                                                              :wheel :motor :controller :gear)))
+                                                              :wheel :motor :controller :gear :half-pin :axle-pin
+                                                              :bush :cross-block :l-beam :round-tile)))
                 (size (read-size (funcall param "size")))
                 (color (read-keyword (funcall param "color") *colors*))
                 (near (let ((v (funcall param "near"))) (and v (find (read-number v) specs :key #'spec-id))))

@@ -53,12 +53,42 @@ through along Y, ours along :rear with its holes through along :right.")
      ((4 8) . "3035") ((6 10) . "3033"))
     (:tile ((1 2) . "3069b") ((2 2) . "3068b"))
     (:technic-brick (4 . "3701") (6 . "3894") (8 . "3702") (16 . "3703"))
-    (:beam (3 . "32523") (5 . "32316") (7 . "32524") (9 . "40490") (11 . "32525") (15 . "32278"))
-    (:axle (3 . "4519") (4 . "3705") (5 . "32073") (6 . "3706") (8 . "3707") (10 . "3737") (12 . "3708"))
-    (:pin (nil . "3673"))
+    (:beam (1 . "18654") (3 . "32523") (5 . "32316") (7 . "32524") (9 . "40490") (11 . "32525") (15 . "32278"))
+    (:axle (2 . "32062") (3 . "4519") (4 . "3705") (5 . "32073") (6 . "3706") (8 . "3707") (10 . "3737") (12 . "3708"))
+    (:pin (2 . "3673") (3 . "6558"))
+    (:half-pin (nil . "4274"))
+    (:axle-pin (1 . "43093") (2 . "11214"))
+    (:bush (nil . "3713"))
+    (:cross-block (2 . "6536") (3 . "42003"))
+    (:l-beam ((3 5) . "32526"))
+    (:round-tile (nil . "98138"))
     (:gear (8 . "3647") (16 . "4019") (24 . "3648b") (40 . "3649")))
   "Per type, an alist from size key to official part number.  The brick
-family's key is the two plan sizes, smaller first.")
+family's key is the two plan sizes, smaller first; the L-beam's its two
+arms; a part of one size has nil.")
+
+(defparameter *frame-same* '((1 0 0) (0 1 0) (0 0 1))
+  "Rows. A library part whose frame is ours as it stands: the cross
+blocks and the L-beam, whose Brickyard frames were drawn up from theirs.")
+
+(defparameter *ldraw-frames*
+  `((:axle ,*frame-across* (0 0 0)) (:pin ,*frame-across* (0 0 0))
+    (:half-pin ,*frame-across* (0 0 0)) (:axle-pin ,*frame-across* (0 0 0))
+    (:gear ,*frame-along* (0 0 0)) (:bush ,*frame-along* (0 0 0))
+    (:beam ,*frame-beam* (0 0 0))
+    (:cross-block ,*frame-same* (0 0 0)) (:l-beam ,*frame-same* (0 0 0))
+    (:technic-brick ,*frame-across* (0 0 24)) (:round-tile ,*frame-across* (0 0 8)))
+  "Per type outside the brick family, (frame offset) of its library parts,
+read from the library files: pins and axle-pins lie along X from their
+collar, the bush and gears turn about Z, beams hold their holes along Y.")
+
+(defun ldraw-key (type size)
+  "The key a part of this type and size has in *ldraw-parts*."
+  (case type
+    ((:half-pin :bush :round-tile) nil)
+    (:l-beam size)
+    (:technic-brick (second size))
+    (t (first size))))
 
 (defun matrix* (a b)
   "Product of two 3 by 3 matrices given as lists of rows."
@@ -88,18 +118,11 @@ the library parts that make up the spec; nil when there are none."
                       (mapcar #'(lambda (k) (list number frame (list 0 0 (* 24 (1+ k)))))
                               (iota (/ h 3)))))
                    (t (list (list number frame (list 0 0 8))))))))
-        (:technic-brick
-         (let ((number (part (second size))))
-           (when number (list (list number *frame-across* '(0 0 24))))))
-        (:beam
-         (let ((number (part (first size))))
-           (when number (list (list number *frame-beam* '(0 0 0))))))
-        (:gear
-         (let ((number (part (first size))))
-           (when number (list (list number *frame-along* '(0 0 0))))))
-        ((:axle :pin)
-         (let ((number (part (first size))))
-           (when number (list (list number *frame-across* '(0 0 0))))))))))
+        (t
+         (let ((number (part (ldraw-key type size)))
+               (frame (rest (assoc type *ldraw-frames*))))
+           (when (and number frame)
+             (list (list number (first frame) (second frame))))))))))
 
 (defun ldraw-line (color rows at frame offset file)
   "A type 1 line placing file, whose frame maps to the spec's by frame
@@ -255,13 +278,13 @@ survey in about half a second, which every edit of the build repeats.")
         (dolist (pair (rest entry))
           (destructuring-bind (key . number) pair
             (setf (gethash number table)
-                  (ecase type
+                  (case type
                     (:brick (list type key *frame-across* '(0 0 24)))
                     ((:plate :tile) (list type key *frame-across* '(0 0 8)))
-                    (:technic-brick (list type (list key) *frame-across* '(0 0 24)))
-                    (:beam (list type (list key) *frame-beam* '(0 0 0)))
-                    (:gear (list type (list key) *frame-along* '(0 0 0)))
-                    ((:axle :pin) (list type (and key (list key)) *frame-across* '(0 0 0)))))))))))
+                    (t (destructuring-bind (frame offset) (rest (assoc type *ldraw-frames*))
+                         (list type
+                               (cond ((null key) nil) ((listp key) key) (t (list key)))
+                               frame offset)))))))))))
 
 (defun parse-decimal (string)
   "Rational. A decimal number like -12, 0.5 or 1e-3 read exactly, or nil."
@@ -331,7 +354,8 @@ document; one section named \"\" when the text has none."
                                                  (or (= (length word) (length stem))
                                                      (char= (char stem (length word)) #\-)))))
                             ;; longest first, so technic-brick is not read as brick
-                            '(:technic-brick :controller :motor :wheel :brick :plate :tile :beam :axle :pin :gear)))
+                            '(:technic-brick :cross-block :round-tile :controller :axle-pin :half-pin
+                              :l-beam :motor :wheel :brick :plate :tile :beam :axle :bush :pin :gear)))
              (rest (and type (string-left-trim "-" (subseq stem (length (symbol-name type))))))
              (size (and type (if (string= rest "")
                                  nil

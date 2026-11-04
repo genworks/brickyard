@@ -24,7 +24,9 @@
 ;;
 ;; :type   :brick (w l [plates-high, default 3]), :plate (w l), :tile (w l),
 ;;         :technic-brick (l), :beam (holes), :axle (studs long), :pin (),
-;;         :wheel (d [w, default 2]), :motor (), :controller (), :gear (teeth)
+;;         :wheel (d [w, default 2]), :motor (), :controller (), :gear (teeth),
+;;         :pin ([2 or 3 studs long]), :half-pin (), :axle-pin ([pin 1 or 2]),
+;;         :bush (), :cross-block ([2 or 3]), :l-beam (3 5), :round-tile ()
 ;; :at     the part's anchor in LDU: the center of the bottom face for
 ;;         bricks, plates and tiles, the middle of the part otherwise
 ;; :up :rear   where the part's own :top and :rear face, as axis keywords
@@ -44,7 +46,8 @@ still pull the part onto it (three studs).")
 (defparameter *default-colors*
   '(:brick :red :plate :blue :tile :yellow :technic-brick :grey
     :beam :grey-light :axle :black :pin :black
-    :wheel :grey-light :motor :grey-light :controller :white :gear :grey))
+    :wheel :grey-light :motor :grey-light :controller :white :gear :grey
+    :half-pin :grey :axle-pin :blue :bush :grey :cross-block :grey :l-beam :grey-light :round-tile :white))
 
 (defun mm (ldu) (* ldu *mm-per-ldu*))
 
@@ -104,7 +107,11 @@ brick family, (n) for beams and axles, () for a pin."
       (:technic-brick (list 1 (first size) 3))
       ((:beam :axle :gear) (list (first size)))
       (:wheel (list (first size) (or (second size) 2)))
-      ((:pin :motor :controller) nil))))
+      (:pin (list (or (first size) 2)))
+      (:axle-pin (list (or (first size) 1)))
+      (:cross-block (list (or (first size) 2)))
+      (:l-beam (list 3 5))
+      ((:half-pin :bush :round-tile :motor :controller) nil))))
 
 (defun move-spec (spec at)
   (let ((new (copy-list spec))) (setf (getf new :at) at) new))
@@ -171,9 +178,36 @@ a stud wide."
          (hole-row :pin-hole 0 (mapcar #'(lambda (j) (row-offset j n)) (iota n)) 0 '(1 0 0) 10)))
       (:axle
        (list (make-connector :kind :axle :point '(0 0 0) :dir '(0 1 0) :half (* 10 (first size)))))
+      ;; pins and axle-pins: a pin connector per stud of pin, along :rear
       (:pin
+       (hole-row :pin 0 (if (eql (first size) 3) '(-20 0 20) '(-10 10)) 0 '(0 1 0) 10))
+      (:half-pin
        (list (make-connector :kind :pin :point '(0 -10 0) :dir '(0 1 0) :half 10)
-             (make-connector :kind :pin :point '(0 10 0) :dir '(0 1 0) :half 10)))
+             (make-connector :kind :stud :point '(0 0 0) :dir '(0 1 0))))
+      (:axle-pin
+       (if (eql (first size) 2)
+           (append (hole-row :pin 0 '(-20 0) 0 '(0 1 0) 10)
+                   (list (make-connector :kind :axle :point '(0 20 0) :dir '(0 1 0) :half 10)))
+           (list (make-connector :kind :pin :point '(0 -10 0) :dir '(0 1 0) :half 10)
+                 (make-connector :kind :axle :point '(0 10 0) :dir '(0 1 0) :half 10))))
+      (:bush
+       (list (make-connector :kind :axle-hole :point '(0 0 0) :dir '(0 1 0) :half 10)))
+      ;; a cross block lies along :rear: its axle hole across it along
+      ;; :right, its pin holes through it along :top
+      (:cross-block
+       (if (eql (first size) 3)
+           (cons (make-connector :kind :axle-hole :point '(0 -20 0) :dir '(1 0 0) :half 10)
+                 (hole-row :pin-hole 0 '(0 20) 0 '(0 0 1) 10))
+           (list (make-connector :kind :axle-hole :point '(0 0 0) :dir '(1 0 0) :half 10)
+                 (make-connector :kind :pin-hole :point '(0 20 0) :dir '(0 0 1) :half 10))))
+      ;; the L-beam, as the library has it: holes through along :rear, the
+      ;; long arm's end hole at the anchor, five holes up along :top to the
+      ;; corner, and from the corner three along :right
+      (:l-beam
+       (mapcar #'(lambda (p) (make-connector :kind :pin-hole :point p :dir '(0 1 0) :half 10))
+               '((0 0 0) (0 0 20) (0 0 40) (0 0 60) (0 0 80) (20 0 80) (40 0 80))))
+      (:round-tile
+       (list (make-connector :kind :socket :point '(0 0 0) :dir '(0 0 -1))))
       (:wheel
        (list (make-connector :kind :axle-hole :point '(0 0 0) :dir '(0 1 0) :half (* 10 (second size)))))
       (:gear
@@ -201,7 +235,13 @@ a stud wide."
          (list (list (* -10 w) (* -10 l) 0) (list (* 10 w) (* 10 l) (* 8 h)))))
       (:beam (let ((y (+ (* 10 (1- (first size))) 9))) (list (list -10 (- y) -9) (list 10 y 9))))
       (:axle (let ((y (* 10 (first size)))) (list (list -6 (- y) -6) (list 6 y 6))))
-      (:pin (list '(-6 -20 -6) '(6 20 6)))
+      (:pin (if (eql (first size) 3) (list '(-6 -30 -6) '(6 30 6)) (list '(-6 -20 -6) '(6 20 6))))
+      (:half-pin (list '(-6 -20 -6) '(6 0 6)))
+      (:axle-pin (if (eql (first size) 2) (list '(-6 -30 -6) '(6 30 6)) (list '(-6 -20 -6) '(6 20 6))))
+      (:bush (list '(-9 -10 -9) '(9 10 9)))
+      (:cross-block (if (eql (first size) 3) (list '(-10 -30 -10) '(10 30 10)) (list '(-10 -10 -10) '(10 30 10))))
+      (:l-beam (list '(-9 -10 -9) '(49 10 89)))
+      (:round-tile (list '(-10 -10 0) '(10 10 8)))
       (:wheel (destructuring-bind (d w) size
                 (list (list (* -10 d) (* -10 w) (* -10 d)) (list (* 10 d) (* 10 w) (* 10 d)))))
       (:gear (let ((r (+ (pitch-radius (first size)) 5/2)))
@@ -217,6 +257,20 @@ a stud wide."
                                 :point (v+ at (rotate rows (connector-point c)))
                                 :dir (rotate rows (connector-dir c))))
             (local-connectors spec))))
+
+(defun local-boxes (spec)
+  "List of boxes, each two corners, that the part fills: its extent, or for
+an L-beam one box per arm, so a part in the crook of the L is clear."
+  (case (spec-type spec)
+    (:l-beam (list (list '(-9 -10 -9) '(9 10 89)) (list '(-9 -10 71) '(49 10 89))))
+    (t (list (local-extent spec)))))
+
+(defun world-boxes (spec)
+  (let ((rows (part-rotation (spec-up spec) (spec-rear spec))) (at (spec-at spec)))
+    (mapcar #'(lambda (box)
+                (let ((corners (mapcar #'(lambda (p) (rotate rows p)) box)))
+                  (list (v+ at (apply #'mapcar #'min corners)) (v+ at (apply #'mapcar #'max corners)))))
+            (local-boxes spec))))
 
 (defun world-extent (spec)
   (let* ((rows (part-rotation (spec-up spec) (spec-rear spec)))
@@ -274,10 +328,17 @@ round hole turns freely; it is still held.")
 ;; seconds.
 ;;
 
-(defstruct (placed (:constructor %make-placed)) spec extent connectors)
+(defstruct (placed (:constructor %make-placed)) spec extent boxes connectors)
 
 (defun placed (spec)
-  (%make-placed :spec spec :extent (world-extent spec) :connectors (world-connectors spec)))
+  (%make-placed :spec spec :extent (world-extent spec) :boxes (world-boxes spec)
+                :connectors (world-connectors spec)))
+
+(defun boxes-overlap-p (pa pb)
+  "True when the two parts' boxes share volume: their extents, then each of their boxes."
+  (and (extents-overlap-p (placed-extent pa) (placed-extent pb))
+       (some #'(lambda (a) (some #'(lambda (b) (extents-overlap-p a b)) (placed-boxes pb)))
+             (placed-boxes pa))))
 
 (defun extents-overlap-p (ea eb)
   "True when the two boxes share volume, not merely a face."
@@ -303,7 +364,7 @@ round hole turns freely; it is still held.")
 (defun placed-collide-p (pa pb)
   "True when the parts take the same space and are not a pin or axle in
 its hole, nor two gears in mesh."
-  (and (extents-overlap-p (placed-extent pa) (placed-extent pb))
+  (and (boxes-overlap-p pa pb)
        (notany #'(lambda (j) (member (first j) '(:axial :mesh))) (placed-joints pa pb))))
 
 (defstruct (survey (:constructor %make-survey)) placed pairs)
@@ -340,8 +401,7 @@ its hole, nor two gears in mesh."
 (defun collisions (specs &optional (survey (survey specs)))
   (mapcan #'(lambda (pair)
               (destructuring-bind (i j js) pair
-                (when (and (extents-overlap-p (placed-extent (aref (survey-placed survey) i))
-                                              (placed-extent (aref (survey-placed survey) j)))
+                (when (and (boxes-overlap-p (aref (survey-placed survey) i) (aref (survey-placed survey) j))
                            (notany #'(lambda (k) (member (first k) '(:axial :mesh))) js))
                   (list (list i j)))))
           (survey-pairs survey)))
@@ -386,6 +446,10 @@ An axle in a round pin hole turns freely and carries nothing."
       (some #'(lambda (k) (and (eql (connector-kind (third k)) kind-i) (eql (connector-kind (second k)) kind-j)))
             (gethash (cons j i) table))))
 
+(defparameter *shafts* '(:axle :axle-pin)
+  "Part types that carry turning along their axle: an axle-pin's axle end
+turns what sits on it as an axle does; its pin end turns freely.")
+
 (defun power-flow-of (specs survey)
   (let* ((n (length specs))
          (types (coerce (mapcar #'spec-type specs) 'vector))
@@ -400,11 +464,11 @@ An axle in a round pin hole turns freely and carries nothing."
                  (dolist (j (aref near i) result)
                    (progn
                      (case (aref types i)
-                       (:axle
+                       ((:axle :axle-pin)
                         (when (and (member (aref types j) '(:gear :wheel)) (held-p j :axle-hole i :axle))
                           (push (list j speed) result)))
                        ((:gear :wheel)
-                        (when (and (eql (aref types j) :axle) (held-p i :axle-hole j :axle))
+                        (when (and (member (aref types j) *shafts*) (held-p i :axle-hole j :axle))
                           (push (list j speed) result))
                         (when (and (eql (aref types i) :gear) (eql (aref types j) :gear)
                                    (held-p i :gear j :gear))
@@ -413,7 +477,7 @@ An axle in a round pin hole turns freely and carries nothing."
         (when (eql (aref types m) :motor)
           (let ((speeds (make-hash-table))
                 (queue (remove nil (mapcar #'(lambda (j)
-                                               (when (and (eql (aref types j) :axle)
+                                               (when (and (member (aref types j) *shafts*)
                                                           (held-p m :axle-hole j :axle))
                                                  (list j 1)))
                                            (aref near m)))))

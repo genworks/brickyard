@@ -89,6 +89,18 @@ goes to the server, which answers with the parts that changed.
 | `:motor` | none: 2 by 4 studs, two bricks high, output hub at its rear | center of the bottom face |
 | `:controller` | none: 4 by 6 studs, two bricks high | center of the bottom face |
 | `:gear` | `(teeth)`: 8, 16, 24, 40 in the bin, any count works | its middle |
+| `:pin` | `([2 or 3])`: studs long, 2 by default | its middle |
+| `:half-pin` | none: a pin on one side of the collar, a stud on the other | its collar |
+| `:axle-pin` | `([1 or 2])`: studs of pin; one stud of axle | where the library has it |
+| `:bush` | none: a stud long, on an axle | its middle |
+| `:cross-block` | `([2 or 3])`: an axle hole across it, pin holes through it | where the library has it |
+| `:l-beam` | `(3 5)` | the end hole of the long arm |
+| `:round-tile` | none: 1 by 1 | center of the bottom face |
+
+The Technic connectors follow the LDraw library's own parts (6558,
+4274, 43093, 11214, 3713, 6536, 42003, 32526, 98138): their pins,
+holes, studs and axle ends were placed from the library files and
+checked against them in every orientation.
 
 The wheel, motor and controller are this program's own designs, sized
 to the stud grid.  A wheel has an axle hole through its hub; a motor

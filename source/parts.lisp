@@ -102,12 +102,104 @@
          :display-controls (the display-controls))))
 
 
-(define-object pin (part-mixin)
-  :documentation (:description "A Technic pin, two studs long, along its own :rear, with its collar in the middle.")
+(defun shaft-segments (spec)
+  "List of (kind from to), in LDU along the part's own :rear, that draw a
+pin, a half pin or an axle-pin: :pin and :stud round, :axle a cross,
+:collar the ring between them.  The ends and collars are where the
+LDraw library puts them."
+  (let ((size (spec-size spec)))
+    (ecase (spec-type spec)
+      (:pin (if (eql (first size) 3)
+                '((:pin -30 30) (:collar -11 -9))
+                '((:pin -20 20) (:collar -1 1))))
+      (:half-pin '((:pin -20 0) (:collar -1 1) (:stud 0 4)))
+      (:axle-pin (if (eql (first size) 2)
+                     '((:pin -30 10) (:collar 9 11) (:axle 10 30))
+                     '((:pin -20 0) (:collar -1 1) (:axle 0 20)))))))
+
+
+(define-object axle-segment (base-object)
+  :documentation (:description "A stretch of axle: a cross, along its own :rear.")
+
+  :input-slots (length (radius 2.4))
 
   :objects
-  ((shaft :type 'cylinder :radius 2.4 :length 15.8 :display-controls (the display-controls))
-   (collar :type 'cylinder :radius 3.0 :length 0.8 :display-controls (the display-controls))))
+  ((vane :type 'box
+         :sequence (:size 2)
+         :width (if (zerop (the-child index)) 4.8 1.8)
+         :height (if (zerop (the-child index)) 1.8 4.8)
+         :length (the length)
+         :display-controls (the display-controls))))
+
+
+(define-object pin (part-mixin)
+  :documentation (:description "A Technic pin, half pin or axle-pin along its own :rear, drawn from its segments.")
+
+  :computed-slots ((segments (shaft-segments (the spec))))
+
+  :objects
+  ((pieces :type (:sequence (mapcar #'(lambda (s) (if (eql (first s) :axle) 'axle-segment 'cylinder))
+                                    (the segments)))
+           :sequence (:size (length (the segments)))
+           :pseudo-inputs (segment)
+           :segment (nth (the-child index) (the segments))
+           :radius (if (eql (first (the-child segment)) :collar) 3.0 2.4)
+           :length (- (mm (- (third (the-child segment)) (second (the-child segment)))) 0.1)
+           :center (the (local-point (list 0 (/ (+ (second (the-child segment)) (third (the-child segment))) 2) 0)))
+           :display-controls (the display-controls))))
+
+
+(define-object bush (part-mixin)
+  :documentation (:description "A Technic bush: a short sleeve with two flanges, on an axle along its own :rear.")
+
+  :objects
+  ((sleeve :type 'cylinder :radius 3.0 :length 7.8 :display-controls (the display-controls))
+   (flanges :type 'cylinder
+            :sequence (:size 2)
+            :radius 3.6 :length 0.8
+            :center (the (local-point (list 0 (if (zerop (the-child index)) -9 9) 0)))
+            :display-controls (the display-controls))))
+
+
+(define-object cross-block (part-mixin)
+  :documentation (:description "A Technic cross block, 2 or 3 holes long along its own :rear: an axle hole across it, pin holes through it.")
+
+  :computed-slots ((n (first (the size))))
+
+  :objects
+  ((body :type 'box
+         :width 7.8 :height 7.8 :length (- (* 8 (the n)) 0.2)
+         :center (the (local-point (list 0 (if (= (the n) 3) 0 10) 0)))
+         :display-controls (the display-controls))))
+
+
+(define-object l-beam (part-mixin)
+  :documentation (:description "A Technic L-beam 3 by 5: holes through along its own :rear, five up along :top from the anchor to the corner, three along :right from the corner.")
+
+  :objects
+  ((arms :type 'box
+         :sequence (:size 2)
+         :width (if (zerop (the-child index)) 16.0 7.2)
+         :height (if (zerop (the-child index)) 7.2 32.0)
+         :length 7.9
+         :center (the (local-point (if (zerop (the-child index)) '(20 0 80) '(0 0 40))))
+         :display-controls (the display-controls))
+   (end-caps :type 'cylinder
+         :sequence (:size 3)
+         :radius 3.6 :length 7.9
+         :center (the (local-point (nth (the-child index) '((0 0 0) (0 0 80) (40 0 80)))))
+         :display-controls (the display-controls))))
+
+
+(define-object round-tile (part-mixin)
+  :documentation (:description "A round tile 1 by 1: a smooth disk a plate high.")
+
+  :objects
+  ((disk :type 'cylinder
+         :radius 3.9 :length 3.2
+         :center (the (local-point '(0 0 4)))
+         :orientation (alignment :rear (the (face-normal-vector :top)))
+         :display-controls (the display-controls))))
 
 
 (define-object axle-hole-mark (base-object)
@@ -208,7 +300,11 @@
     ((:brick :plate :tile :technic-brick) 'brick)
     (:beam 'beam)
     (:axle 'axle)
-    (:pin 'pin)
+    ((:pin :half-pin :axle-pin) 'pin)
+    (:bush 'bush)
+    (:cross-block 'cross-block)
+    (:l-beam 'l-beam)
+    (:round-tile 'round-tile)
     (:wheel 'wheel)
     (:gear 'gear)
     (:motor 'motor)

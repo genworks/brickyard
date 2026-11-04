@@ -67,7 +67,9 @@
   async function apply(reply) {
     say(reply.ok ? '' : reply.message);
     (reply.removed || []).forEach(removePart);
-    for (const p of reply.parts || []) await putPart(p);
+    const changed = reply.parts || [];
+    if (changed.length > 1) await putParts(changed);
+    else for (const p of changed) await putPart(p);
     if (reply.status) report(reply.status);
     if (selected !== null && !parts.has(selected)) selected = null;
     highlight();
@@ -83,11 +85,31 @@
 
   async function putPart(p) {
     const scene = await browser.createX3DFromString(p.x3d);
+    removePart(p.id);
+    group.addChildren = new X3D.MFNode(wire(scene, p));
+  }
+
+  // Many parts at once (a whole build, a group moved together): their
+  // documents' scenes are joined into one, parsed once, and added in one
+  // step; parsing them one by one took half a minute for a few hundred.
+  async function putParts(ps) {
+    const open = '<Scene>', close = '</Scene>';
+    const first = ps[0].x3d;
+    const head = first.slice(0, first.indexOf(open) + open.length);
+    const body = ps.map(function (p) {
+      return p.x3d.slice(p.x3d.indexOf(open) + open.length, p.x3d.lastIndexOf(close));
+    }).join('');
+    const scene = await browser.createX3DFromString(head + body + close + '</X3D>');
+    ps.forEach(function (p) { removePart(p.id); });
+    group.addChildren = new X3D.MFNode(...ps.map(function (p) { return wire(scene, p); }));
+  }
+
+  // Find part p's nodes in scene, record them and hook up its sensor;
+  // returns the outer Transform to be added to the parts group.
+  function wire(scene, p) {
     const outer = scene.getNamedNode('p' + p.id);
     const sensor = scene.getNamedNode('p' + p.id + 's');
     const inner = scene.getNamedNode('p' + p.id + 'd');
-    removePart(p.id);
-    group.addChildren = new X3D.MFNode(outer);
     const part = { outer: outer, sensor: sensor, inner: inner, label: p.label, dragged: null };
     parts.set(p.id, part);
     sensor.addFieldCallback('brickyard', 'isActive', function (active) {
@@ -110,6 +132,7 @@
       lastDrag = { id: p.id, x: t.x, y: t.y };
       preview(lastDrag);
     });
+    return outer;
   }
 
   // The selected part glows: every Material under it gets an emissive tint.
