@@ -110,12 +110,6 @@ collar, the bush and gears turn about Z, beams hold their holes along Y.")
     (:technic-brick (second size))
     (t (first size))))
 
-(defun matrix* (a b)
-  "Product of two 3 by 3 matrices given as lists of rows."
-  (let ((columns (apply #'mapcar #'list b)))
-    (mapcar #'(lambda (row) (mapcar #'(lambda (column) (dot row column)) columns)) a)))
-
-(defun transpose (m) (apply #'mapcar #'list m))
 
 (defun ldraw-color (color)
   (or (cdr (assoc color *ldraw-colors*)) 71))
@@ -149,7 +143,15 @@ the library parts that make up the spec; nil when there are none."
 and whose origin sits at offset in it, for a spec turned by rows at at."
   (let ((position (rotate *ldraw-axes* (v+ (rotate rows offset) at)))
         (matrix (matrix* *ldraw-axes* (matrix* rows frame))))
-    (format nil "1 ~d ~{~a~^ ~} ~{~a~^ ~} ~a" color position (reduce #'append matrix) file)))
+    (format nil "1 ~d ~{~a~^ ~} ~{~a~^ ~} ~a" color
+            (mapcar #'ldraw-text position) (mapcar #'ldraw-text (reduce #'append matrix)) file)))
+
+(defun ldraw-text (x)
+  "A number as an LDraw file writes it: whole numbers plain, others to six places."
+  (if (integerp x)
+      (format nil "~d" x)
+      (let ((text (format nil "~,6f" x)))
+        (string-right-trim "." (string-right-trim "0" text)))))
 
 (defun custom-name (spec)
   (format nil "brickyard-~(~a~)~@[-~{~a~^x~}~].dat" (spec-type spec) (spec-size spec)))
@@ -167,7 +169,7 @@ and whose origin sits at offset in it, for a spec turned by rows at at."
 (defun custom-geometry (part spec)
   "List of LDraw quad and triangle lines drawing part, a Gendl object
 standing where spec says, in its own frame turned into LDraw's axes."
-  (let* ((rows (part-rotation (spec-up spec) (spec-rear spec)))
+  (let* ((rows (spec-rotation spec))
          (back (transpose rows))
          (at (spec-at spec))
          (color (spec-color spec))
@@ -222,7 +224,7 @@ subfile for each kind of part the official library has no match for."
         (model nil))
     (dotimes (i (length specs))
       (let* ((spec (nth i specs))
-             (rows (part-rotation (spec-up spec) (spec-rear spec)))
+             (rows (spec-rotation spec))
              (color (ldraw-color (spec-color spec)))
              (placements (ldraw-placements spec)))
         (if placements
@@ -244,9 +246,10 @@ subfile for each kind of part the official library has no match for."
 ;; LDraw import: the inverse.  A library part is known by its number
 ;; (older numbers of the same part too), a Brickyard subfile by its
 ;; name; submodels are flattened through their placements, and color
-;; 16 takes the color of the line that placed it.  A part Brickyard
-;; does not have, or one turned off the square grid, is left out and
-;; counted.  The text is untrusted: numbers are read by hand, never by
+;; 16 takes the color of the line that placed it.  A part at an angle
+;; off the square grid comes in at that angle; a part Brickyard does
+;; not have, or one placed as a mirror image, is left out and counted.
+;; The text is untrusted: numbers are read by hand, never by
 ;; the Lisp reader, and its size and part count are capped.
 ;;
 
@@ -279,8 +282,10 @@ survey in about half a second, which every edit of the build repeats.")
                 (mapcar #'(lambda (e) (format nil "~a x~d" (first e) (rest e)))
                         (subseq unknown 0 (min 5 (length unknown))))
                 (> (length unknown) 5))))
-    (when (plusp (getf report :turned))
-      (format s " Left out ~d turned off the square grid." (getf report :turned)))
+    (when (plusp (getf report :at-angle 0))
+      (format s " ~d stand at an angle, as placed." (getf report :at-angle)))
+    (when (plusp (getf report :mirrored 0))
+      (format s " Left out ~d placed as mirror images." (getf report :mirrored)))
     (when (plusp (getf report :straightened 0))
       (format s " Set square a slight tilt the model was shown at."))
     (when (plusp (getf report :drawn 0))
@@ -422,21 +427,37 @@ Parts are known by a run of three or more digits (3001, 32062, u9006)."
                (and dash (plusp dash) (every #'digit-char-p (subseq stem 0 dash))
                     (< dash (1- (length stem))) (digit-char-p (char stem (1+ dash)))))))))
 
+(defun orthonormal (rows)
+  "The rotation nearest rows, made exactly orthonormal (Gram-Schmidt on
+its columns, as double floats), or nil when rows mirror or collapse."
+  (let* ((c0 (mapcar #'(lambda (x) (coerce x 'double-float)) (column rows 0)))
+         (c1 (mapcar #'(lambda (x) (coerce x 'double-float)) (column rows 1)))
+         (c2 (column rows 2)))
+    (when (and (> (norm c0) 1d-6) (> (norm c1) 1d-6))
+      (let* ((x (unit c0))
+             (y (unit (v- c1 (mapcar #'(lambda (e) (* (dot c1 x) e)) x))))
+             (z (cross x y)))
+        (when (plusp (dot z c2))
+          (mapcar #'list x y z))))))
+
+(defun thousandth (x) (/ (round (* x 1000)) 1000d0))
+
 (defun color-from-ldraw (code)
   (or (car (rassoc code *ldraw-colors*)) (cdr (assoc code *ldraw-color-names*))))
 
 (defun from-ldraw (text)
   "Two values: a list of part specs read from LDraw text (.ldr or .mpd),
 and a plist reporting what was left out: :unknown, an alist of part
-names to counts; :turned, parts off the square grid; :recolored, parts
+names to counts; :mirrored, parts placed as mirror images, left out;
+:at-angle, parts kept at an angle off the square grid; :recolored, parts
 whose color Brickyard lacks; :submodels, submodels flattened; :cut,
 true when a limit stopped the reading; :too-big, true when the text
 was too long to read at all."
   (let* ((limits *ldraw-limits*)
          (sections (when (<= (length text) (getf limits :bytes)) (ldraw-sections text)))
          (catalog (ldraw-catalog))
-         (specs nil) (unknown nil) (turned 0) (recolored 0) (submodels 0) (count 0) (visits 0) (cut nil)
-         (unreadable 0) (drawn 0) (straightened 0))
+         (specs nil) (unknown nil) (mirrored 0) (at-angle 0) (recolored 0) (submodels 0) (count 0) (visits 0)
+         (cut nil) (unreadable 0) (drawn 0) (straightened 0))
     (labels ((place (tokens parent-color parent-p parent-a depth)
                (when (> (incf visits) (getf limits :visits)) (setf cut t) (return-from place))
                (unless (>= (length tokens) 15) (incf unreadable) (return-from place))
@@ -457,19 +478,27 @@ was too long to read at all."
                    (cond ((or known custom)
                           (destructuring-bind (type size frame offset)
                               (or known (list (first custom) (second custom) (transpose *ldraw-axes*) '(0 0 0)))
-                            (let ((rows (square-matrix (matrix* (transpose *ldraw-axes*) (matrix* a (transpose frame))))))
-                              (if (null rows)
-                                  (incf turned)
-                                  (let ((color (color-from-ldraw code)))
-                                    (unless color (incf recolored))
-                                    (if (> (incf count) (getf limits :parts))
-                                        (setf cut t)
-                                      (push (list :type type :size size
-                                                  :at (mapcar #'round (v- (rotate (transpose *ldraw-axes*) p) (rotate rows offset)))
-                                                  :up (axis-key (rotate rows '(0 0 1)))
-                                                  :rear (axis-key (rotate rows '(0 1 0)))
-                                                  :color (or color :grey))
-                                            specs)))))))
+                            (let* ((raw (matrix* (transpose *ldraw-axes*) (matrix* a (transpose frame))))
+                                   (rows (square-matrix raw))
+                                   (angled (and (null rows) (orthonormal raw)))
+                                   (color (color-from-ldraw code)))
+                              (cond ((and (null rows) (null angled)) (incf mirrored))
+                                    ((> (incf count) (getf limits :parts)) (setf cut t))
+                                    (t
+                                     (unless color (incf recolored))
+                                     (push (if rows
+                                               (list :type type :size size
+                                                     :at (mapcar #'round (v- (rotate (transpose *ldraw-axes*) p) (rotate rows offset)))
+                                                     :up (axis-key (rotate rows '(0 0 1)))
+                                                     :rear (axis-key (rotate rows '(0 1 0)))
+                                                     :color (or color :grey))
+                                               (progn
+                                                 (incf at-angle)
+                                                 (list :type type :size size
+                                                       :at (mapcar #'thousandth (v- (rotate (transpose *ldraw-axes*) p) (rotate angled offset)))
+                                                       :matrix angled
+                                                       :color (or color :grey))))
+                                           specs))))))
                          ((and section (< depth (getf limits :depth)))
                           (incf submodels)
                           (dolist (child (rest section))
@@ -491,7 +520,7 @@ was too long to read at all."
                                    (nthcdr 14 tokens)))))
           (place tokens 16 '(0 0 0) '((1 0 0) (0 1 0) (0 0 1)) 0))))
     (values (nreverse specs)
-            (list :unknown (sort unknown #'> :key #'rest) :turned turned :recolored recolored
+            (list :unknown (sort unknown #'> :key #'rest) :mirrored mirrored :at-angle at-angle :recolored recolored
                   :submodels submodels :unreadable unreadable :cut cut :drawn drawn
                   :straightened straightened
                   :too-big (> (length text) (getf limits :bytes))))))

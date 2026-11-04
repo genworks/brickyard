@@ -81,6 +81,44 @@ its columns the world directions of the part's :right, :rear and :top."
 
 (defun rotate (rows v) (mapcar #'(lambda (row) (dot row v)) rows))
 
+(defun spec-rotation (spec)
+  "Rows. The part's turn: its :matrix when it stands at an angle (a part
+read from another program, a steered wheel), else the square turn its
+:up and :rear name."
+  (or (getf spec :matrix) (part-rotation (spec-up spec) (spec-rear spec))))
+
+(defun column (rows j) (mapcar #'(lambda (row) (nth j row)) rows))
+
+(defun matrix* (a b)
+  "Product of two 3 by 3 matrices given as lists of rows."
+  (let ((columns (apply #'mapcar #'list b)))
+    (mapcar #'(lambda (row) (mapcar #'(lambda (column) (dot row column)) columns)) a)))
+
+(defun transpose (m) (apply #'mapcar #'list m))
+
+(defun norm (v) (sqrt (dot v v)))
+
+(defun unit (v)
+  (let ((n (norm v))) (if (zerop n) v (mapcar #'(lambda (x) (/ x n)) v))))
+
+;;
+;; Parts on the square grid compare exactly; a part at an angle carries
+;; floating-point positions, so joints are judged within a tolerance:
+;; points within half an LDU (0.2 mm), directions within a hundredth of
+;; a radian.  Studs 20 LDU apart cannot be confused at that, and a grid
+;; build passes every test as exactly as before.
+;;
+
+(defparameter *tolerance* 1/2 "LDU. How near two points must be to count as one.")
+
+(defparameter *angle-tolerance* 1/100 "Radians, near enough. How near two directions must be to count as one.")
+
+(defun near-p (a b) (every #'(lambda (x y) (<= (abs (- x y)) *tolerance*)) a b))
+
+(defun parallel-p (a b) (< (norm (cross a b)) *angle-tolerance*))
+
+(defun opposite-p (a b) (and (parallel-p a b) (minusp (dot a b))))
+
 (defun collect-pairs (function items)
   "List of the non-nil values of function on (i j item-i item-j), i < j."
   (let (result)
@@ -316,7 +354,7 @@ and 20 tooth double bevels) a stud.  Every gear's hub is a stud wide."
       (:controller (list '(-40 -60 0) '(40 60 48))))))
 
 (defun world-connectors (spec)
-  (let ((rows (part-rotation (spec-up spec) (spec-rear spec))) (at (spec-at spec)))
+  (let ((rows (spec-rotation spec)) (at (spec-at spec)))
     (mapcar #'(lambda (c)
                 (make-connector :kind (connector-kind c) :half (connector-half c)
                                 :radius (connector-radius c)
@@ -343,24 +381,66 @@ an L-beam one box per arm, so a part in the crook of the L is clear."
     (:pin-block (list (list '(-10 -30 -10) '(10 30 10))
                       (list '(-6 -26 -30) '(6 -14 30)) (list '(-6 14 -30) '(6 26 30))))
     ;; a rim is a drum round a hub: the hub around its axle hole, and four
-    ;; slabs for the drum, leaving a tunnel along the axle for bushes; a
-    ;; tyre is the same ring further out, round the rim
-    (:rim (cons (list '(-8 -20 -8) '(8 0 8)) (ring-boxes 12 38 25)))
+    ;; slabs for the drum's shell (radius 27 to 38, as the library's rim
+    ;; has it), leaving the dish inside open for bushes and steering
+    ;; knuckles; a tyre is the same ring further out, round the rim
+    (:rim (cons (list '(-8 -20 -8) '(8 0 8)) (ring-boxes 27 38 25)))
+    ;; the angle connector's hub is round about :right and its arms round
+    ;; about :top: bounded by the squares inside those circles, so the part
+    ;; turned about either axis -- a steering pivot -- does not swing its
+    ;; corners into its neighbors
+    (:angle-connector (cons (list '(-10 -7 -7) '(10 7 7))
+                            (mapcar #'(lambda (z) (if (minusp z) (list '(-7 -7 -30) (list 7 7 -7)) (list '(-7 -7 7) '(7 7 30))))
+                                    (if (eql (first (spec-size spec)) 2) '(-1 1) '(-1)))))
     (:tyre (ring-boxes 38 62 25))
     (t (list (local-extent spec)))))
 
+;;
+;; Boxes in the world are oriented: (center axes halves), the axes the
+;; part's own, so a part at an angle is bounded by a box at that angle.
+;; Its extent is that box's square outline.  On the grid every axis is
+;; a unit integer vector and all of it stays exact.
+;;
+
+(defun oriented-box (rows at box)
+  (destructuring-bind (lo hi) box
+    (list (v+ at (rotate rows (mapcar #'(lambda (a b) (/ (+ a b) 2)) lo hi)))
+          (mapcar #'(lambda (j) (let ((v (column rows j))) (if (= (dot v v) 1) v (unit v)))) '(0 1 2))
+          (mapcar #'(lambda (a b) (/ (- b a) 2)) lo hi))))
+
+(defun box-outline (obb)
+  "The square box, low and high corners, round an oriented box."
+  (destructuring-bind (center axes halves) obb
+    (let ((reach (mapcar #'(lambda (i) (reduce #'+ (mapcar #'(lambda (axis h) (* h (abs (nth i axis)))) axes halves)))
+                         '(0 1 2))))
+      (list (v- center reach) (v+ center reach)))))
+
 (defun world-boxes (spec)
-  (let ((rows (part-rotation (spec-up spec) (spec-rear spec))) (at (spec-at spec)))
-    (mapcar #'(lambda (box)
-                (let ((corners (mapcar #'(lambda (p) (rotate rows p)) box)))
-                  (list (v+ at (apply #'mapcar #'min corners)) (v+ at (apply #'mapcar #'max corners)))))
-            (local-boxes spec))))
+  "List of the part's oriented boxes in the world."
+  (let ((rows (spec-rotation spec)) (at (spec-at spec)))
+    (mapcar #'(lambda (box) (oriented-box rows at box)) (local-boxes spec))))
 
 (defun world-extent (spec)
-  (let* ((rows (part-rotation (spec-up spec) (spec-rear spec)))
-         (at (spec-at spec))
-         (corners (mapcar #'(lambda (p) (rotate rows p)) (local-extent spec))))
-    (list (v+ at (apply #'mapcar #'min corners)) (v+ at (apply #'mapcar #'max corners)))))
+  (box-outline (oriented-box (spec-rotation spec) (spec-at spec) (local-extent spec))))
+
+(defun obb-deep-p (a b slack)
+  "True when oriented boxes a and b run into each other deeper than slack
+on every axis that could separate them: the separating-axis test, each
+box's three axes and their nine cross products."
+  (destructuring-bind (ca axes-a halves-a) a
+    (destructuring-bind (cb axes-b halves-b) b
+      (let ((between (v- cb ca)))
+        (flet ((separates-p (l)
+                 (let ((len (norm l)))
+                   (and (> len 1/1000000)
+                        (let ((l (if (= len 1) l (mapcar #'(lambda (x) (/ x len)) l))))
+                          (flet ((reach (axes halves)
+                                   (reduce #'+ (mapcar #'(lambda (axis h) (* h (abs (dot axis l)))) axes halves))))
+                            (>= (abs (dot between l))
+                                (- (+ (reach axes-a halves-a) (reach axes-b halves-b)) slack))))))))
+          (not (or (some #'separates-p axes-a)
+                   (some #'separates-p axes-b)
+                   (some #'(lambda (u) (some #'(lambda (v) (separates-p (cross u v))) axes-b)) axes-a))))))))
 
 ;;
 ;; Mates
@@ -383,17 +463,17 @@ round hole turns freely; it is still held.")
 (defun mate-p (a b)
   "The kind of joint connectors a and b make where they stand, or nil."
   (case (complementary-p a b)
-    (:face (and (equal (connector-point a) (connector-point b))
-                (zero-vector-p (v+ (connector-dir a) (connector-dir b)))
+    (:face (and (near-p (connector-point a) (connector-point b))
+                (opposite-p (connector-dir a) (connector-dir b))
                 :face))
     ;; a tyre on its rim: one center, one axis
-    (:seat (and (equal (connector-point a) (connector-point b))
-                (zero-vector-p (cross (connector-dir a) (connector-dir b)))
+    (:seat (and (near-p (connector-point a) (connector-point b))
+                (parallel-p (connector-dir a) (connector-dir b))
                 :seat))
     (:axial (let ((d (v- (connector-point b) (connector-point a)))
                   (dir (connector-dir a)))
-              (and (zero-vector-p (cross dir (connector-dir b)))
-                   (zero-vector-p (cross d dir))
+              (and (parallel-p dir (connector-dir b))
+                   (< (norm (cross d dir)) *tolerance*)
                    (< (abs (dot d dir)) (+ (connector-half a) (connector-half b)))
                    :axial)))
     ;; two gears on parallel axes, faces overlapping, centers apart by
@@ -403,9 +483,9 @@ round hole turns freely; it is still held.")
                   (along (dot d dir))
                   (across (v- d (mapcar #'(lambda (x) (* along x)) dir)))
                   (reach (+ (connector-radius a) (connector-radius b))))
-             (and (zero-vector-p (cross dir (connector-dir b)))
+             (and (parallel-p dir (connector-dir b))
                   (< (abs along) (+ (connector-half a) (connector-half b)))
-                  (= (dot across across) (* reach reach))
+                  (< (abs (- (norm across) reach)) *tolerance*)
                   :mesh)))))
 
 ;;
@@ -428,14 +508,22 @@ round hole turns freely; it is still held.")
 do not collide: real parts are chamfered where these boxes are square, and
 models built in other programs sit that close (0.8 mm).")
 
+(defparameter *angled-overlap-slack* 7/2
+  "LDU. The slack when either part stands at an angle: round parts are boxed
+square, and a turned box's corners reach out about this far (a beam's end,
+a cross block's edge), on top of the four-place decimals other programs
+write.  It stays under 4, half a plate, the least a misplaced part on the
+grid can overlap by, so no grid mistake is hidden.")
+
 (defun boxes-overlap-p (pa pb)
-  "True when the two parts' boxes share volume, deeper than *overlap-slack*
-along every axis: their extents, then each of their boxes."
-  (flet ((deep-p (ea eb)
-           (every #'(lambda (alo ahi blo bhi) (and (< (+ alo *overlap-slack*) bhi) (< (+ blo *overlap-slack*) ahi)))
-                  (first ea) (second ea) (first eb) (second eb))))
-    (and (deep-p (placed-extent pa) (placed-extent pb))
-         (some #'(lambda (a) (some #'(lambda (b) (deep-p a b)) (placed-boxes pb)))
+  "True when the two parts' boxes share volume, deeper than the slack on
+every separating axis: their outlines first, then each pair of their
+oriented boxes."
+  (let ((slack (if (or (getf (placed-spec pa) :matrix) (getf (placed-spec pb) :matrix))
+                   *angled-overlap-slack*
+                   *overlap-slack*)))
+    (and (extents-overlap-p (placed-extent pa) (placed-extent pb))
+         (some #'(lambda (a) (some #'(lambda (b) (obb-deep-p a b slack)) (placed-boxes pb)))
                (placed-boxes pa)))))
 
 (defun extents-overlap-p (ea eb)
@@ -638,11 +726,11 @@ theirs, the others' connectors, may be given when they are known."
     (dolist (a (world-connectors spec))
       (dolist (b theirs)
         (dolist (move (case (complementary-p a b)
-                        (:face (when (zero-vector-p (v+ (connector-dir a) (connector-dir b)))
+                        (:face (when (opposite-p (connector-dir a) (connector-dir b))
                                  (list (v- (connector-point b) (connector-point a)))))
-                        (:seat (when (zero-vector-p (cross (connector-dir a) (connector-dir b)))
+                        (:seat (when (parallel-p (connector-dir a) (connector-dir b))
                                  (list (v- (connector-point b) (connector-point a)))))
-                        (:axial (when (zero-vector-p (cross (connector-dir a) (connector-dir b)))
+                        (:axial (when (parallel-p (connector-dir a) (connector-dir b))
                                   (axial-moves a b)))))
           (push (cons (sqrt (dot move move)) move) result))))
     (stable-sort (nreverse result) #'< :key #'first)))
@@ -664,6 +752,11 @@ how far up or down."
         ((> (first a) (first b)) nil)
         (t (rank< (rest a) (rest b)))))
 
+(defun grid-spec (spec)
+  "The spec on whole LDU when it stands square; a part at an angle keeps
+the position it has, which is rarely whole."
+  (if (getf spec :matrix) spec (move-spec spec (mapcar #'round (spec-at spec)))))
+
 (defun shift-specs (specs move)
   (mapcar #'(lambda (s) (move-spec s (v+ (spec-at s) move))) specs))
 
@@ -677,7 +770,7 @@ LDU that any member makes with the others, any height, landing on top
 before going underneath; failing that, when free? and it is clear where
 it is, left there with its first member on a grid of half studs and
 plates (it will be loose); else nil."
-  (let* ((group (mapcar #'(lambda (s) (move-spec s (mapcar #'round (spec-at s)))) group))
+  (let* ((group (mapcar #'grid-spec group))
          (others (mapcar #'placed others))
          (theirs (mapcan #'(lambda (o) (copy-list (placed-connectors o))) others))
          (moves (remove-if #'(lambda (m) (> (first (move-rank m)) reach))
@@ -709,9 +802,15 @@ plates (it will be loose); else nil."
       (:y (list z y (- x))))))
 
 (defun turn-spec (spec about)
+  "The spec turned a quarter about the world axis about: its :up and :rear
+when it stands square, its :matrix turned when it stands at an angle."
   (let ((new (copy-list spec)))
-    (setf (getf new :up) (axis-key (quarter-turn about (axis (spec-up spec))))
-          (getf new :rear) (axis-key (quarter-turn about (axis (spec-rear spec)))))
+    (if (getf spec :matrix)
+        (setf (getf new :matrix)
+              (let ((turn (transpose (mapcar #'(lambda (e) (quarter-turn about e)) '((1 0 0) (0 1 0) (0 0 1))))))
+                (matrix* turn (getf spec :matrix))))
+        (setf (getf new :up) (axis-key (quarter-turn about (axis (spec-up spec))))
+              (getf new :rear) (axis-key (quarter-turn about (axis (spec-rear spec))))))
     new))
 
 (defun turn-group (group about)
@@ -782,6 +881,7 @@ snaps within reach."
   (let ((own (list (spec-up spec) (spec-rear spec))) best best-distance)
     (dolist (orientation (cons own (remove own *orientations* :test #'equal)) best)
       (let* ((turned (let ((new (copy-list spec)))
+                       (remf new :matrix)
                        (setf (getf new :up) (first orientation) (getf new :rear) (second orientation))
                        new))
              (dropped (drop-spec turned others :reach reach :free? nil)))
@@ -804,8 +904,8 @@ snaps within reach."
 
 (defun snap-spec (spec others &key (radius *snap-radius*))
   "The spec moved onto its nearest clear joint with the others within
-radius LDU, or nil.  Its :at is rounded to whole LDU first."
-  (let ((spec (move-spec spec (mapcar #'round (spec-at spec)))))
+radius LDU, or nil.  Its :at is rounded to whole LDU first if it stands square."
+  (let ((spec (grid-spec spec)))
     (dolist (candidate (snap-moves spec others))
       (when (> (first candidate) radius) (return nil))
       (let ((moved (move-spec spec (v+ (spec-at spec) (rest candidate)))))

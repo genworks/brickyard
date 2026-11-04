@@ -94,8 +94,13 @@ part."
           :spec (the-child place)
           :center (destructuring-bind (x y z) (spec-at (the-child place))
                     (translate (the center) :right (mm x) :rear (mm y) :up (mm z)))
-          :orientation (alignment :top (the (face-normal-vector (spec-up (the-child place))))
-                                  :rear (the (face-normal-vector (spec-rear (the-child place)))))
+          ;; the part's own :top and :rear in the world, its rotation's
+          ;; third and second columns -- square or at an angle alike
+          :orientation (let* ((rows (spec-rotation (the-child place)))
+                              (top (mapcar #'float (column rows 2)))
+                              (rear (mapcar #'float (column rows 1))))
+                         (alignment :top (make-vector (first top) (second top) (third top))
+                                    :rear (make-vector (first rear) (second rear) (third rear))))
           :display-controls (list :color (spec-color (the-child place)))))
 
   :functions

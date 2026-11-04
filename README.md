@@ -138,6 +138,16 @@ a brick 24; one LDU is 0.4 mm.  Axes follow Gendl: X `:right`, Y
 `:rear`, Z `:top`.  `:up` and `:rear` say where the part's own top and
 rear face, as axis keywords, which gives the 24 square-on rotations.
 
+A part may instead stand at any angle: `:matrix`, three rows of a
+rotation, in place of `:up` and `:rear`, and an `:at` that need not be
+whole -- a steered wheel, a roll-cage strut, anything read from another
+program at an angle.  Square parts compare exactly; joints with an
+angled part are judged within half an LDU and a hundredth of a radian,
+and its boxes are oriented with it (overlap by the separating-axis
+test), allowed 3.5 LDU against 2 for square parts, since round parts
+are boxed square.  Angled parts move, turn a quarter, export and import
+like any other.
+
 ## How it is built
 
 - `source/specs.lisp` is plain Lisp over the specs: connectors (studs,
