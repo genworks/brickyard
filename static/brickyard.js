@@ -223,6 +223,23 @@
     e.preventDefault();
   });
 
+  // Import: the chosen file's text goes to the server, which makes a new
+  // build of it and says what it left out; the page then opens that build.
+  document.getElementById('import-file').addEventListener('change', function (e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    say('Reading ' + file.name + ' ...');
+    file.text()
+      .then(function (text) { return fetch('/brickyard/import', { method: 'POST', body: text, headers: { 'Content-Type': 'text/plain' } }); })
+      .then(function (r) { return r.json(); })
+      .then(function (reply) {
+        if (reply.ok) location.href = '/brickyard?b=' + reply.build + '&note=' + encodeURIComponent(reply.note);
+        else say(reply.message);
+      })
+      .catch(function (err) { say('The import did not go through: ' + err); });
+    e.target.value = '';
+  });
+
   // Start: the empty world, then every part.
   async function start() {
     browser = X3D.getBrowser(canvas);
@@ -231,6 +248,7 @@
     group = browser.currentScene.getNamedNode('parts');
     await api('state');
     browser.viewAll(0);
+    if (document.body.dataset.note) say(document.body.dataset.note);
     document.querySelector('#swatches .swatch[data-color="' + color + '"]').classList.add('chosen');
   }
 

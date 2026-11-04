@@ -55,12 +55,14 @@ of the motor's speed, the other way.")
     part-specs *sample-build* :settable))
 
   :computed-slots
-  ((connections (connections (the part-specs)))
-   (collisions (collisions (the part-specs)))
+  (("The build surveyed once: each part's box and connectors, and the joints of touching pairs."
+    survey (survey (the part-specs)))
+   (connections (connections (the part-specs) (the survey)))
+   (collisions (collisions (the part-specs) (the survey)))
    (groups (groups (length (the part-specs)) (the connections)))
    ("List of indices. Parts not held, through any chain of joints, to the first part."
     loose (sort (apply #'append (rest (the groups))) #'<))
-   (power-flow (multiple-value-list (power-flow (the part-specs))))
+   (power-flow (multiple-value-list (power-flow (the part-specs) (the survey))))
    ("List of (motor wheel speed): each wheel a motor turns, at what speed against it."
     drives (first (the power-flow)))
    ("List of indices. Parts a motor would turn at two speeds at once: a jammed train."

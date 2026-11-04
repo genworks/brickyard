@@ -57,6 +57,16 @@ the motor, the controller and sizes the library lacks go in the same
 file as subfiles drawn from the Gendl model.  `to-ldraw` gives the
 same text from Lisp.
 
+"Import LDraw" takes an `.ldr` or `.mpd` file and opens it as a new
+build.  Library parts Brickyard has come in by number (older numbers
+of the same parts too, such as 3023 and 3648), Brickyard's own
+subfiles by name, and submodels are flattened through their
+placements.  Parts Brickyard does not have, parts turned off the
+square grid, and lines that cannot be read are left out and named in
+a note.  A file is limited to 4 MB and 2000 parts; numbers are read by
+hand, never by the Lisp reader.  `from-ldraw` does the same from Lisp
+and returns the specs and that report.
+
 The page is X_ITE, an X3D browser: each part is its own Transform with
 a PlaneSensor, so dragging runs in the browser and only the release
 goes to the server, which answers with the parts that changed.

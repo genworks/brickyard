@@ -43,7 +43,8 @@ header {
 
 header h1 { margin: 0; font-size: 18px; color: var(--accent); }
 header #build-name { color: var(--muted); font-family: ui-monospace, monospace; }
-header a { color: var(--ink); }
+header a, header .import { color: var(--ink); }
+header .import { text-decoration: underline; cursor: pointer; }
 
 main { flex: 1; display: flex; min-height: 0; }
 

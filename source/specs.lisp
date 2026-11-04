@@ -209,77 +209,6 @@ a stud wide."
       (:motor (list '(-20 -40 0) '(20 60 48)))
       (:controller (list '(-40 -60 0) '(40 60 48))))))
 
-;;
-;; What a robot build is asked: which motor turns which wheel, and what
-;; it stands on.
-;;
-
-(defun power-flow (specs)
-  "Two values.  A list of (motor wheel ratio): each wheel a motor turns,
-and how fast against the motor -- 1/3 is a third the speed, negative
-is the other way round.  And a list of the indices of parts that two
-paths from one motor would turn at different speeds: a jammed train.
-
-Power goes from a motor's output into the axle it holds; from an axle
-into the gears and wheels whose axle holes it fills; from a gear or
-wheel into its axle and, for a gear, into the gears it meshes with,
-whose speed is the driver's times its teeth over theirs, reversed.
-An axle in a round pin hole turns freely and carries nothing."
-  (let* ((n (length specs))
-         (types (coerce (mapcar #'spec-type specs) 'vector))
-         (connectors (coerce (mapcar #'world-connectors specs) 'vector))
-         drives jammed)
-    (labels ((held-p (i kind-i j kind-j)
-               (some #'(lambda (a)
-                         (and (eql (connector-kind a) kind-i)
-                              (some #'(lambda (b) (and (eql (connector-kind b) kind-j) (mate-p a b)))
-                                    (aref connectors j))))
-                     (aref connectors i)))
-             (teeth (i) (first (spec-size (nth i specs))))
-             (onward (i speed)
-               "List of (j speed) for the parts part i turns directly."
-               (let (result)
-                 (dotimes (j n result)
-                   (unless (= i j)
-                     (case (aref types i)
-                       (:axle
-                        (when (and (member (aref types j) '(:gear :wheel)) (held-p j :axle-hole i :axle))
-                          (push (list j speed) result)))
-                       ((:gear :wheel)
-                        (when (and (eql (aref types j) :axle) (held-p i :axle-hole j :axle))
-                          (push (list j speed) result))
-                        (when (and (eql (aref types i) :gear) (eql (aref types j) :gear)
-                                   (held-p i :gear j :gear))
-                          (push (list j (- (* speed (/ (teeth i) (teeth j))))) result)))))))))
-      (dotimes (m n)
-        (when (eql (aref types m) :motor)
-          (let ((speeds (make-hash-table))
-                (queue (remove nil (mapcar #'(lambda (j)
-                                               (when (and (eql (aref types j) :axle)
-                                                          (held-p m :axle-hole j :axle))
-                                                 (list j 1)))
-                                           (iota n)))))
-            (do () ((null queue))
-              (destructuring-bind (i speed) (pop queue)
-                (multiple-value-bind (known seen?) (gethash i speeds)
-                  (cond ((not seen?)
-                         (setf (gethash i speeds) speed)
-                         (setf queue (append queue (onward i speed))))
-                        ((/= known speed) (pushnew i jammed))))))
-            (dotimes (w n)
-              (when (eql (aref types w) :wheel)
-                (multiple-value-bind (speed seen?) (gethash w speeds)
-                  (when seen? (push (list m w speed) drives))))))))
-      (values (nreverse drives) (sort jammed #'<)))))
-
-(defun ground-contacts (specs &key (tolerance 2))
-  "List of indices of the parts whose lowest point is within tolerance LDU of the build's."
-  (when specs
-    (let* ((lows (mapcar #'(lambda (s) (third (first (world-extent s)))) specs))
-           (lowest (reduce #'min lows)))
-      (remove nil (mapcar #'(lambda (i z) (when (<= (- z lowest) tolerance) i))
-                          (iota (length specs)) lows)))))
-
 (defun world-connectors (spec)
   (let ((rows (part-rotation (spec-up spec) (spec-rear spec))) (at (spec-at spec)))
     (mapcar #'(lambda (c)
@@ -336,36 +265,178 @@ round hole turns freely; it is still held.")
                   (= (dot across across) (* reach reach))
                   :mesh)))))
 
-(defun joints (spec-a spec-b)
-  "List of (kind point) for every pair of connectors of the two parts that mate."
-  (let ((cb (world-connectors spec-b)))
-    (mapcan #'(lambda (a)
-                (mapcan #'(lambda (b)
-                            (let ((kind (mate-p a b)))
-                              (when kind (list (list kind (connector-point a))))))
-                        cb))
-            (world-connectors spec-a))))
+;;
+;; The survey.  Every question about a build is asked of pairs of parts,
+;; and two parts can only join or collide when their boxes touch.  So a
+;; part's box and connectors are worked out once, and connectors are
+;; compared only for pairs whose boxes touch: a few hundred parts cost
+;; milliseconds where comparing every pair connector by connector cost
+;; seconds.
+;;
 
-(defun connections (specs)
-  "List of (i j joint-count kinds) for every pair of parts that hold each other."
-  (collect-pairs #'(lambda (i j a b)
-                     (let ((js (joints a b)))
-                       (when js (list i j (length js) (remove-duplicates (mapcar #'first js))))))
-                 specs))
+(defstruct (placed (:constructor %make-placed)) spec extent connectors)
+
+(defun placed (spec)
+  (%make-placed :spec spec :extent (world-extent spec) :connectors (world-connectors spec)))
 
 (defun extents-overlap-p (ea eb)
   "True when the two boxes share volume, not merely a face."
   (every #'(lambda (alo ahi blo bhi) (and (< alo bhi) (< blo ahi)))
          (first ea) (second ea) (first eb) (second eb)))
 
+(defun extents-touch-p (ea eb)
+  "True when the two boxes share volume or a face, or come within a unit."
+  (every #'(lambda (alo ahi blo bhi) (and (<= alo (1+ bhi)) (<= blo (1+ ahi))))
+         (first ea) (second ea) (first eb) (second eb)))
+
+(defun placed-joints (pa pb)
+  "List of (kind ca cb) for every connector ca of pa and cb of pb that mate."
+  (when (extents-touch-p (placed-extent pa) (placed-extent pb))
+    (let ((cbs (placed-connectors pb)))
+      (mapcan #'(lambda (ca)
+                  (mapcan #'(lambda (cb)
+                              (let ((kind (mate-p ca cb)))
+                                (when kind (list (list kind ca cb)))))
+                          cbs))
+              (placed-connectors pa)))))
+
+(defun placed-collide-p (pa pb)
+  "True when the parts take the same space and are not a pin or axle in
+its hole, nor two gears in mesh."
+  (and (extents-overlap-p (placed-extent pa) (placed-extent pb))
+       (notany #'(lambda (j) (member (first j) '(:axial :mesh))) (placed-joints pa pb))))
+
+(defstruct (survey (:constructor %make-survey)) placed pairs)
+
+(defun survey (specs)
+  "A survey of the build: each part placed, and (i j joints) for every
+pair i < j whose boxes touch."
+  (let* ((placed (coerce (mapcar #'placed specs) 'vector))
+         (n (length placed))
+         (pairs nil))
+    (dotimes (i n)
+      (do ((j (1+ i) (1+ j))) ((>= j n))
+        (when (extents-touch-p (placed-extent (aref placed i)) (placed-extent (aref placed j)))
+          (push (list i j (placed-joints (aref placed i) (aref placed j))) pairs))))
+    (%make-survey :placed placed :pairs (nreverse pairs))))
+
+(defun joints (spec-a spec-b)
+  "List of (kind point) for every pair of connectors of the two parts that mate."
+  (mapcar #'(lambda (j) (list (first j) (connector-point (second j))))
+          (placed-joints (placed spec-a) (placed spec-b))))
+
+(defun connections (specs &optional (survey (survey specs)))
+  "List of (i j joint-count kinds) for every pair of parts that hold each other."
+  (mapcan #'(lambda (pair)
+              (destructuring-bind (i j js) pair
+                (when js (list (list i j (length js) (remove-duplicates (mapcar #'first js)))))))
+          (survey-pairs survey)))
+
 (defun collide-p (spec-a spec-b)
   "True when the parts take the same space and are not a pin or axle in
 its hole, nor two gears in mesh."
-  (and (extents-overlap-p (world-extent spec-a) (world-extent spec-b))
-       (notany #'(lambda (j) (member (first j) '(:axial :mesh))) (joints spec-a spec-b))))
+  (placed-collide-p (placed spec-a) (placed spec-b)))
 
-(defun collisions (specs)
-  (collect-pairs #'(lambda (i j a b) (when (collide-p a b) (list i j))) specs))
+(defun collisions (specs &optional (survey (survey specs)))
+  (mapcan #'(lambda (pair)
+              (destructuring-bind (i j js) pair
+                (when (and (extents-overlap-p (placed-extent (aref (survey-placed survey) i))
+                                              (placed-extent (aref (survey-placed survey) j)))
+                           (notany #'(lambda (k) (member (first k) '(:axial :mesh))) js))
+                  (list (list i j)))))
+          (survey-pairs survey)))
+
+;;
+;; What a robot build is asked: which motor turns which wheel, and what
+;; it stands on.
+;;
+
+(defun power-flow (specs &optional (survey (survey specs)))
+  "Two values.  A list of (motor wheel ratio): each wheel a motor turns,
+and how fast against the motor -- 1/3 is a third the speed, negative
+is the other way round.  And a list of the indices of parts that two
+paths from one motor would turn at different speeds: a jammed train.
+
+Power goes from a motor's output into the axle it holds; from an axle
+into the gears and wheels whose axle holes it fills; from a gear or
+wheel into its axle and, for a gear, into the gears it meshes with,
+whose speed is the driver's times its teeth over theirs, reversed.
+An axle in a round pin hole turns freely and carries nothing."
+  (power-flow-of specs survey))
+
+(defun pair-table (survey)
+  "Hash table from (i . j), i < j, to the pair's joints, for the pairs that join."
+  (let ((table (make-hash-table :test #'equal)))
+    (dolist (pair (survey-pairs survey) table)
+      (when (third pair) (setf (gethash (cons (first pair) (second pair)) table) (third pair))))))
+
+(defun neighbors (survey)
+  "Vector of lists: for each part, the parts it joins."
+  (let ((result (make-array (length (survey-placed survey)) :initial-element nil)))
+    (dolist (pair (survey-pairs survey) result)
+      (when (third pair)
+        (push (second pair) (aref result (first pair)))
+        (push (first pair) (aref result (second pair)))))))
+
+(defun held-by-p (table i kind-i j kind-j)
+  "True when a connector of kind-i on part i mates one of kind-j on part j."
+  (if (< i j)
+      (some #'(lambda (k) (and (eql (connector-kind (second k)) kind-i) (eql (connector-kind (third k)) kind-j)))
+            (gethash (cons i j) table))
+      (some #'(lambda (k) (and (eql (connector-kind (third k)) kind-i) (eql (connector-kind (second k)) kind-j)))
+            (gethash (cons j i) table))))
+
+(defun power-flow-of (specs survey)
+  (let* ((n (length specs))
+         (types (coerce (mapcar #'spec-type specs) 'vector))
+         (table (pair-table survey))
+         (near (neighbors survey))
+         drives jammed)
+    (labels ((held-p (i kind-i j kind-j) (held-by-p table i kind-i j kind-j))
+             (teeth (i) (first (spec-size (nth i specs))))
+             (onward (i speed)
+               "List of (j speed) for the parts part i turns directly."
+               (let (result)
+                 (dolist (j (aref near i) result)
+                   (progn
+                     (case (aref types i)
+                       (:axle
+                        (when (and (member (aref types j) '(:gear :wheel)) (held-p j :axle-hole i :axle))
+                          (push (list j speed) result)))
+                       ((:gear :wheel)
+                        (when (and (eql (aref types j) :axle) (held-p i :axle-hole j :axle))
+                          (push (list j speed) result))
+                        (when (and (eql (aref types i) :gear) (eql (aref types j) :gear)
+                                   (held-p i :gear j :gear))
+                          (push (list j (- (* speed (/ (teeth i) (teeth j))))) result)))))))))
+      (dotimes (m n)
+        (when (eql (aref types m) :motor)
+          (let ((speeds (make-hash-table))
+                (queue (remove nil (mapcar #'(lambda (j)
+                                               (when (and (eql (aref types j) :axle)
+                                                          (held-p m :axle-hole j :axle))
+                                                 (list j 1)))
+                                           (aref near m)))))
+            (do () ((null queue))
+              (destructuring-bind (i speed) (pop queue)
+                (multiple-value-bind (known seen?) (gethash i speeds)
+                  (cond ((not seen?)
+                         (setf (gethash i speeds) speed)
+                         (setf queue (append queue (onward i speed))))
+                        ((/= known speed) (pushnew i jammed))))))
+            (dotimes (w n)
+              (when (eql (aref types w) :wheel)
+                (multiple-value-bind (speed seen?) (gethash w speeds)
+                  (when seen? (push (list m w speed) drives))))))))
+      (values (nreverse drives) (sort jammed #'<)))))
+
+(defun ground-contacts (specs &key (tolerance 2))
+  "List of indices of the parts whose lowest point is within tolerance LDU of the build's."
+  (when specs
+    (let* ((lows (mapcar #'(lambda (s) (third (first (world-extent s)))) specs))
+           (lowest (reduce #'min lows)))
+      (remove nil (mapcar #'(lambda (i z) (when (<= (- z lowest) tolerance) i))
+                          (iota (length specs)) lows)))))
 
 (defun groups (n links)
   "List of lists of part indices, each a set of parts held together."
@@ -397,10 +468,11 @@ the next one along is offered."
             (stable-sort (remove-if #'(lambda (o) (> (abs o) slack)) offsets)
                          #'< :key #'(lambda (o) (abs (- o along)))))))
 
-(defun snap-moves (spec others)
+(defun snap-moves (spec others &optional (theirs (mapcan #'world-connectors others)))
   "List of (distance . move) for every way one of the spec's connectors
-could be brought onto a mating connector of the others, nearest first."
-  (let ((theirs (mapcan #'world-connectors others)) result)
+could be brought onto a mating connector of the others, nearest first.
+theirs, the others' connectors, may be given when they are known."
+  (let (result)
     (dolist (a (world-connectors spec))
       (dolist (b theirs)
         (dolist (move (case (complementary-p a b)
@@ -412,7 +484,9 @@ could be brought onto a mating connector of the others, nearest first."
     (stable-sort (nreverse result) #'< :key #'first)))
 
 (defun collides-with-any-p (spec others)
-  (some #'(lambda (o) (collide-p spec o)) others))
+  "True when spec collides with any of others, specs or placed parts."
+  (let ((p (placed spec)))
+    (some #'(lambda (o) (placed-collide-p p (if (placed-p o) o (placed o)))) others)))
 
 (defun move-rank (move)
   "List compared in order: the plan distance, rising before sinking, then
@@ -440,8 +514,10 @@ before going underneath; failing that, when free? and it is clear where
 it is, left there with its first member on a grid of half studs and
 plates (it will be loose); else nil."
   (let* ((group (mapcar #'(lambda (s) (move-spec s (mapcar #'round (spec-at s)))) group))
+         (others (mapcar #'placed others))
+         (theirs (mapcan #'(lambda (o) (copy-list (placed-connectors o))) others))
          (moves (remove-if #'(lambda (m) (> (first (move-rank m)) reach))
-                           (mapcan #'(lambda (s) (mapcar #'rest (snap-moves s others))) group))))
+                           (mapcan #'(lambda (s) (mapcar #'rest (snap-moves s nil theirs))) group))))
     (or (dolist (move (stable-sort moves #'rank< :key #'move-rank))
           (let ((moved (shift-specs group move)))
             (when (group-clear-p moved others) (return moved))))
@@ -486,15 +562,7 @@ member's anchor."
 ;; What a part carries: what rests on it alone, and what hangs from it.
 ;;
 
-(defun sits-on-p (upper lower)
-  "True when a socket of upper is on a stud of lower."
-  (let ((studs (remove :stud (world-connectors lower) :key #'connector-kind :test-not #'eql)))
-    (some #'(lambda (socket)
-              (and (eql (connector-kind socket) :socket)
-                   (some #'(lambda (stud) (mate-p socket stud)) studs)))
-          (world-connectors upper))))
-
-(defun carried (specs index)
+(defun carried (specs index &optional (survey (survey specs)))
   "List of the indices that move with part index, index first.  A part
 comes along when everything it rests on comes along; and a set of parts
 held to the moving ones but not standing on the ground through anything
@@ -502,32 +570,39 @@ else (a beam on pins, a wheel on an axle in the moving part) comes along
 too.  The ground is the lowest of the parts that stay.  A part resting
 on the moving part and on something else stays."
   (let* ((n (length specs))
-         (all (iota n))
-         (links (mapcar #'(lambda (c) (list (first c) (second c))) (connections specs)))
-         (supports (mapcar #'(lambda (i)
-                               (remove-if-not #'(lambda (j) (and (/= i j) (sits-on-p (nth i specs) (nth j specs))))
-                                              all))
-                           all))
-         (moving (list index)))
-    (do ((grown t)) ((not grown) (cons index (sort (remove index moving) #'<)))
+         (moving (make-array n :initial-element nil))
+         (supports (make-array n :initial-element nil))
+         (links (mapcan #'(lambda (pair) (when (third pair) (list (list (first pair) (second pair)))))
+                        (survey-pairs survey)))
+         (near (neighbors survey))
+         (lows (map 'vector #'(lambda (p) (third (first (placed-extent p)))) (survey-placed survey))))
+    ;; who sits on whom, from the face joints: a socket on a stud
+    (dolist (pair (survey-pairs survey))
+      (destructuring-bind (i j js) pair
+        (dolist (k js)
+          (when (eql (first k) :face)
+            (if (eql (connector-kind (second k)) :socket)
+                (pushnew j (aref supports i))
+                (pushnew i (aref supports j)))))))
+    (setf (aref moving index) t)
+    (do ((grown t)) ((not grown))
       (setf grown nil)
       ;; what rests on moving parts alone
-      (dolist (i all)
-        (let ((under (nth i supports)))
-          (when (and under (not (member i moving)) (subsetp under moving))
-            (push i moving) (setf grown t))))
+      (dotimes (i n)
+        (let ((under (aref supports i)))
+          (when (and under (not (aref moving i)) (every #'(lambda (j) (aref moving j)) under))
+            (setf (aref moving i) t grown t))))
       ;; what hangs from moving parts, off the ground
-      (let* ((rest (sort (set-difference all moving) #'<))
-             (ground (mapcar #'(lambda (k) (nth k rest))
-                             (ground-contacts (mapcar #'(lambda (i) (nth i specs)) rest))))
-             (inner (remove-if-not #'(lambda (l) (and (member (first l) rest) (member (second l) rest))) links)))
+      (let* ((rest (remove-if #'(lambda (i) (aref moving i)) (iota n)))
+             (lowest (and rest (reduce #'min rest :key #'(lambda (i) (aref lows i)))))
+             (inner (remove-if #'(lambda (l) (or (aref moving (first l)) (aref moving (second l)))) links)))
         (dolist (group (groups n inner))
-          (when (and (subsetp group rest)
-                     (not (intersection group ground))
-                     (some #'(lambda (l) (or (and (member (first l) group) (member (second l) moving))
-                                             (and (member (second l) group) (member (first l) moving))))
-                           links))
-            (setf moving (append group moving) grown t)))))))
+          (when (and (notany #'(lambda (i) (aref moving i)) group)
+                     (notany #'(lambda (i) (<= (- (aref lows i) lowest) 2)) group)
+                     (some #'(lambda (i) (some #'(lambda (j) (aref moving j)) (aref near i))) group))
+            (dolist (i group) (setf (aref moving i) t))
+            (setf grown t)))))
+    (cons index (remove-if-not #'(lambda (i) (and (/= i index) (aref moving i))) (iota n)))))
 
 (defparameter *orientations*
   (let (result)

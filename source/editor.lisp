@@ -289,7 +289,7 @@ nil when there is none."
 ;; The page
 ;;
 
-(defun page-html (build-id)
+(defun page-html (build-id &optional note)
   (cl-who:with-html-output-to-string (s nil :prologue "<!doctype html>")
     (:html :lang "en"
      (:head
@@ -299,14 +299,17 @@ nil when there is none."
       (:link :rel "stylesheet" :href "/brickyard/static/brickyard.css")
       (:script :src gwl::*x-ite-url*)
       (:script :src "/brickyard/static/brickyard.js" :defer "defer"))
-     (:body :data-build build-id
+     ;; cl-who writes attribute values raw: the note is escaped here
+     (:body :data-build build-id :data-note (and note (cl-who:escape-string note))
       (:header (:h1 "Brickyard")
        (:span :id "build-name" (cl-who:str build-id))
        (:a :href "/brickyard?new=1" "New build")
        (:a :href "/brickyard?new=robot" "Robot build")
        (:a :href "/brickyard?new=gearbox" "Gearbox")
        (:a :href "/brickyard?new=empty" "Empty build")
-       (:a :href (format nil "/brickyard/export?b=~a" build-id) :id "export" "Export LDraw"))
+       (:a :href (format nil "/brickyard/export?b=~a" build-id) :id "export" "Export LDraw")
+       (:label :class "import" "Import LDraw"
+        (:input :type "file" :id "import-file" :accept ".ldr,.mpd,.dat,.l3b" :hidden "hidden")))
       (:main
        (:aside :id "bin"
         (dolist (group *palette*)
@@ -379,7 +382,9 @@ an empty group the parts go into."
                                                                 ((string= new "gearbox") *gearbox-build*)
                                                                 (t *sample-build*)))))))
           ((and id (bt:with-lock-held (*builds-lock*) (find-build id)))
-           (respond req ent "text/html; charset=utf-8" (page-html id)))
+           (respond req ent "text/html; charset=utf-8"
+                    (page-html id (let ((note (net.aserve:request-query-value "note" req)))
+                                    (and note (subseq note 0 (min 600 (length note))))))))
           (t (redirect req ent "/brickyard?new=1")))))
 
 (defun export-handler (req ent)
@@ -393,6 +398,23 @@ an empty group the parts go into."
                                                                    (format nil "attachment; filename=\"brickyard-~a.mpd\"" id))))
             (write-string text (net.aserve:request-reply-stream req))))
         (respond req ent "text/plain" "No such build." :code net.aserve:*response-not-found*))))
+
+(defun import-handler (req ent)
+  "POST an LDraw file's text; answers {ok, build, note} or {ok: false, message}."
+  (let* ((declared (parse-decimal (or (net.aserve:header-slot-value req :content-length) "0")))
+         (reply
+           (if (or (null declared) (> declared (getf *ldraw-limits* :bytes)))
+               (json-object :ok nil :message "That file is larger than Brickyard takes (4 MB).")
+               (multiple-value-bind (specs report) (from-ldraw (gwl:request-body-text req))
+                 (cond ((getf report :too-big)
+                        (json-object :ok nil :message "That file is larger than Brickyard takes (4 MB)."))
+                       ((null specs)
+                        (json-object :ok nil :message (format nil "Nothing in that file could be placed.~a"
+                                                              (import-note 0 report))))
+                       (t (json-object :ok t
+                                       :build (bt:with-lock-held (*builds-lock*) (make-build :specs specs))
+                                       :note (import-note (length specs) report))))))))
+    (respond req ent "application/json" (with-output-to-string (s) (yason:encode reply s)))))
 
 (defun api-handler (req ent)
   (let* ((params (net.aserve:form-urlencoded-to-query (gwl:request-body-text req)))
@@ -412,6 +434,7 @@ an empty group the parts go into."
   (net.aserve:publish :path "/brickyard" :server server :function #'page-handler)
   (net.aserve:publish :path "/brickyard/api" :server server :function #'api-handler)
   (net.aserve:publish :path "/brickyard/export" :server server :function #'export-handler)
+  (net.aserve:publish :path "/brickyard/import" :server server :function #'import-handler)
   (net.aserve:publish-directory :prefix "/brickyard/static/" :server server
                                 :destination (namestring *static-directory*)))
 

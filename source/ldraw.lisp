@@ -196,3 +196,213 @@ subfile for each kind of part the official library has no match for."
       (dolist (custom (nreverse customs))
         (format s "0 FILE ~a~%0 ~a (Brickyard)~%0 Name: ~a~%0 Author: Brickyard~%0 !LDRAW_ORG Unofficial_Part~%~{~a~%~}0 NOFILE~%"
                 (first custom) (subseq (first custom) 0 (- (length (first custom)) 4)) (first custom) (rest custom))))))
+
+;;
+;; LDraw import: the inverse.  A library part is known by its number
+;; (older numbers of the same part too), a Brickyard subfile by its
+;; name; submodels are flattened through their placements, and color
+;; 16 takes the color of the line that placed it.  A part Brickyard
+;; does not have, or one turned off the square grid, is left out and
+;; counted.  The text is untrusted: numbers are read by hand, never by
+;; the Lisp reader, and its size and part count are capped.
+;;
+
+(defparameter *ldraw-aliases*
+  '(("3023" . "3023b") ("3648" . "3648b") ("3648a" . "3648b") ("3069" . "3069b")
+    ("3069a" . "3069b") ("3068" . "3068b") ("3068a" . "3068b") ("2780" . "3673"))
+  "Alist of older or variant part numbers to the ones *ldraw-parts* names.")
+
+(defparameter *ldraw-color-names*
+  '((7 . :grey) (8 . :grey-slate-dark) (16 . :grey) (70 . :brown))
+  "Alist of LDraw color codes beyond *ldraw-colors* to Brickyard colors.")
+
+(defparameter *ldraw-limits* '(:bytes 4000000 :parts 2000 :depth 8 :visits 50000)
+  "Plist. The most text, parts, submodel depth and placements visited an
+import will take: a submodel that places itself ten times over is
+cut off by :visits long before its depth runs out.  Two thousand parts
+survey in about half a second, which every edit of the build repeats.")
+
+(defun import-note (count report)
+  "String. What an import brought in and what it left out, for the person who asked."
+  (with-output-to-string (s)
+    (when (plusp count) (format s "Imported ~d part~:p." count))
+    (let ((unknown (getf report :unknown)))
+      (when unknown
+        (format s " Left out ~d part~:p Brickyard does not have:~{ ~a~}~:[~;, and more~]."
+                (reduce #'+ unknown :key #'rest)
+                (mapcar #'(lambda (e) (format nil "~a x~d" (first e) (rest e)))
+                        (subseq unknown 0 (min 5 (length unknown))))
+                (> (length unknown) 5))))
+    (when (plusp (getf report :turned))
+      (format s " Left out ~d turned off the square grid." (getf report :turned)))
+    (when (plusp (getf report :recolored))
+      (format s " ~d in colors Brickyard lacks became grey." (getf report :recolored)))
+    (when (plusp (getf report :unreadable))
+      (format s " ~d line~:p could not be read." (getf report :unreadable)))
+    (when (getf report :cut)
+      (format s " The file was cut off at Brickyard's limit of ~d parts." (getf *ldraw-limits* :parts)))))
+
+(defun ldraw-catalog ()
+  "Hash table from a part number to (type size frame offset)."
+  (let ((table (make-hash-table :test #'equal)))
+    (dolist (entry *ldraw-parts* table)
+      (let ((type (first entry)))
+        (dolist (pair (rest entry))
+          (destructuring-bind (key . number) pair
+            (setf (gethash number table)
+                  (ecase type
+                    (:brick (list type key *frame-across* '(0 0 24)))
+                    ((:plate :tile) (list type key *frame-across* '(0 0 8)))
+                    (:technic-brick (list type (list key) *frame-across* '(0 0 24)))
+                    (:beam (list type (list key) *frame-beam* '(0 0 0)))
+                    (:gear (list type (list key) *frame-along* '(0 0 0)))
+                    ((:axle :pin) (list type (and key (list key)) *frame-across* '(0 0 0)))))))))))
+
+(defun parse-decimal (string)
+  "Rational. A decimal number like -12, 0.5 or 1e-3 read exactly, or nil."
+  (let ((n (length string)) (i 0) (sign 1) (mantissa 0) (scale 0) (digits 0) (exponent 0) (exponent-sign 1))
+    (flet ((digits-while (f) (do () ((or (>= i n) (not (digit-char-p (char string i)))))
+                               (funcall f (digit-char-p (char string i))) (incf i))))
+      (when (and (< i n) (find (char string i) "+-"))
+        (when (char= (char string i) #\-) (setf sign -1))
+        (incf i))
+      (digits-while #'(lambda (d) (setf mantissa (+ (* 10 mantissa) d)) (incf digits)))
+      (when (and (< i n) (char= (char string i) #\.))
+        (incf i)
+        (digits-while #'(lambda (d) (setf mantissa (+ (* 10 mantissa) d)) (incf digits) (incf scale))))
+      (when (and (< i n) (char-equal (char string i) #\e) (> digits 0))
+        (incf i)
+        (when (and (< i n) (find (char string i) "+-"))
+          (when (char= (char string i) #\-) (setf exponent-sign -1))
+          (incf i))
+        (digits-while #'(lambda (d) (setf exponent (+ (* 10 exponent) d)))))
+      (when (and (= i n) (< 0 digits 30) (<= exponent 30))
+        (* sign mantissa (expt 10 (- (* exponent-sign exponent) scale)))))))
+
+(defun split-blanks (line)
+  "List of the strings in line between spaces and tabs."
+  (let (tokens (start nil))
+    (dotimes (i (length line))
+      (if (member (char line i) '(#\Space #\Tab))
+          (when start (push (subseq line start i) tokens) (setf start nil))
+          (unless start (setf start i))))
+    (when start (push (subseq line start) tokens))
+    (nreverse tokens)))
+
+(defun ldraw-name (string)
+  "A file reference as compared: lower case, forward slashes, no folder prefix."
+  (let ((name (string-downcase (substitute #\/ #\\ (string-trim '(#\Space #\Tab #\Return) string)))))
+    (dolist (prefix '("parts/" "p/") name)
+      (when (and (> (length name) (length prefix)) (string= prefix (subseq name 0 (length prefix))))
+        (setf name (subseq name (length prefix)))))))
+
+(defun ldraw-sections (text)
+  "List of (name . lines), in order, one for each FILE of a multi-part
+document; one section named \"\" when the text has none."
+  (let ((sections nil) (current nil))
+    (dolist (raw (uiop:split-string text :separator (list #\Newline)))
+      (let* ((line (string-trim '(#\Space #\Tab #\Return) raw))
+             (tokens (split-blanks line)))
+        (cond ((and (>= (length tokens) 3) (string= (first tokens) "0") (string-equal (second tokens) "FILE"))
+               (when current (push current sections))
+               (setf current (list (ldraw-name (subseq line (+ (search (second tokens) line) 4))))))
+              ((and (= (length tokens) 2) (string= (first tokens) "0") (string-equal (second tokens) "NOFILE"))
+               (when current (push current sections) (setf current nil)))
+              (t (unless current (setf current (list "")))
+                 (push tokens (rest current))))))
+    (when current (push current sections))
+    (mapcar #'(lambda (s) (cons (first s) (reverse (rest s)))) (nreverse sections))))
+
+(defun custom-spec-kind (name)
+  "(type size) from a Brickyard subfile name such as brickyard-wheel-5x2.dat, or nil."
+  (let ((prefix "brickyard-") (suffix ".dat"))
+    (when (and (> (length name) (+ (length prefix) (length suffix)))
+               (string= prefix (subseq name 0 (length prefix)))
+               (string= suffix (subseq name (- (length name) (length suffix)))))
+      (let* ((stem (subseq name (length prefix) (- (length name) (length suffix))))
+             (type (find-if #'(lambda (k) (let ((word (string-downcase (symbol-name k))))
+                                            (and (<= (length word) (length stem))
+                                                 (string= word (subseq stem 0 (length word)))
+                                                 (or (= (length word) (length stem))
+                                                     (char= (char stem (length word)) #\-)))))
+                            ;; longest first, so technic-brick is not read as brick
+                            '(:technic-brick :controller :motor :wheel :brick :plate :tile :beam :axle :pin :gear)))
+             (rest (and type (string-left-trim "-" (subseq stem (length (symbol-name type))))))
+             (size (and type (if (string= rest "")
+                                 nil
+                                 (mapcar #'parse-decimal (uiop:split-string rest :separator "x"))))))
+        (when (and type (every #'(lambda (n) (and (integerp n) (< 0 n 100))) size))
+          (list type size))))))
+
+(defun square-matrix (rows)
+  "The rows rounded to an integer rotation when every entry is within a
+thousandth of -1, 0 or 1 and the result turns without mirroring; else nil."
+  (let ((rounded (mapcar #'(lambda (row) (mapcar #'round row)) rows)))
+    (when (and (every #'(lambda (row r) (every #'(lambda (x y) (< (abs (- x y)) 1/1000)) row r)) rows rounded)
+               (every #'(lambda (row) (= 1 (count-if-not #'zerop row))) rounded)
+               (equal (rotate rounded '(0 0 1))
+                      (cross (rotate rounded '(1 0 0)) (rotate rounded '(0 1 0)))))
+      rounded)))
+
+(defun color-from-ldraw (code)
+  (or (car (rassoc code *ldraw-colors*)) (cdr (assoc code *ldraw-color-names*))))
+
+(defun from-ldraw (text)
+  "Two values: a list of part specs read from LDraw text (.ldr or .mpd),
+and a plist reporting what was left out: :unknown, an alist of part
+names to counts; :turned, parts off the square grid; :recolored, parts
+whose color Brickyard lacks; :submodels, submodels flattened; :cut,
+true when a limit stopped the reading; :too-big, true when the text
+was too long to read at all."
+  (let* ((limits *ldraw-limits*)
+         (sections (when (<= (length text) (getf limits :bytes)) (ldraw-sections text)))
+         (catalog (ldraw-catalog))
+         (specs nil) (unknown nil) (turned 0) (recolored 0) (submodels 0) (count 0) (visits 0) (cut nil)
+         (unreadable 0))
+    (labels ((place (tokens parent-color parent-p parent-a depth)
+               (when (> (incf visits) (getf limits :visits)) (setf cut t) (return-from place))
+               (unless (>= (length tokens) 15) (incf unreadable) (return-from place))
+               (let ((numbers (mapcar #'parse-decimal (subseq tokens 1 14))))
+                 (when (some #'null numbers) (incf unreadable) (return-from place))
+                 (let* ((file (ldraw-name (format nil "~{~a~^ ~}" (nthcdr 14 tokens))))
+                        (code (first numbers))
+                        (code (if (member code '(16 24)) parent-color code))
+                        (p (v+ parent-p (rotate parent-a (subseq numbers 1 4))))
+                        (a (matrix* parent-a (list (subseq numbers 4 7) (subseq numbers 7 10) (subseq numbers 10 13))))
+                        (number (let ((stem (if (and (> (length file) 4) (string= ".dat" (subseq file (- (length file) 4))))
+                                                (subseq file 0 (- (length file) 4))
+                                                file)))
+                                  (or (cdr (assoc stem *ldraw-aliases* :test #'string=)) stem)))
+                        (known (gethash number catalog))
+                        (custom (custom-spec-kind file))
+                        (section (assoc file sections :test #'string=)))
+                   (cond ((or known custom)
+                          (destructuring-bind (type size frame offset)
+                              (or known (list (first custom) (second custom) (transpose *ldraw-axes*) '(0 0 0)))
+                            (let ((rows (square-matrix (matrix* (transpose *ldraw-axes*) (matrix* a (transpose frame))))))
+                              (if (null rows)
+                                  (incf turned)
+                                  (let ((color (color-from-ldraw code)))
+                                    (unless color (incf recolored))
+                                    (if (> (incf count) (getf limits :parts))
+                                        (setf cut t)
+                                      (push (list :type type :size size
+                                                  :at (mapcar #'round (v- (rotate (transpose *ldraw-axes*) p) (rotate rows offset)))
+                                                  :up (axis-key (rotate rows '(0 0 1)))
+                                                  :rear (axis-key (rotate rows '(0 1 0)))
+                                                  :color (or color :grey))
+                                            specs)))))))
+                         ((and section (< depth (getf limits :depth)))
+                          (incf submodels)
+                          (dolist (child (rest section))
+                            (when (string= (first child) "1")
+                              (place child code p a (1+ depth)))))
+                         (t (let ((entry (assoc file unknown :test #'string=)))
+                              (if entry (incf (rest entry)) (push (cons file 1) unknown)))))))))
+      (dolist (tokens (rest (first sections)))
+        (when (and tokens (string= (first tokens) "1"))
+          (place tokens 16 '(0 0 0) '((1 0 0) (0 1 0) (0 0 1)) 0))))
+    (values (nreverse specs)
+            (list :unknown (sort unknown #'> :key #'rest) :turned turned :recolored recolored
+                  :submodels submodels :unreadable unreadable :cut cut
+                  :too-big (> (length text) (getf limits :bytes))))))
