@@ -6,8 +6,9 @@
  "The Gendl™ Brickyard: assemble studded bricks and Technic beams, pins and axles in 3D, with snapping, joints and collisions checked."
  :author "Genworks International" :license
  "Affero Gnu Public License (http://www.gnu.org/licenses/)" :serial t
- :version "20261103" :depends-on nil :around-compile
+ :version "20261104" :depends-on nil :around-compile
  "gendl-asdf:around-compile" :components
  ((:file "source/package") (:file "source/specs")
   (:file "source/parts") (:file "source/assembly")
-  (:file "source/ldraw") (:file "source/editor")))
+  (:file "source/ldraw") (:file "source/editor")
+  (:file "source/api")))

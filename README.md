@@ -70,6 +70,12 @@ a note.  A file is limited to 4 MB and 2000 parts; numbers are read by
 hand, never by the Lisp reader.  `from-ldraw` does the same from Lisp
 and returns the specs and that report.
 
+The package `brickyard-api` drives a build from Lisp, one flat function
+for each thing the page does: `add-part`, `move-part`, `turn-part`,
+`swing-part`, `report`, `describe-build` and the rest, taking literals
+and answering plists, with a refusal an error saying why.
+[docs/api.md](docs/api.md) is the reference, with recipes.
+
 For a private beta, load Gendl's `invite-gate` before Brickyard and
 close the gate to a roster kept on the server:
 

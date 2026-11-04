@@ -10,3 +10,9 @@
   (:export #:assembly #:*sample-build*
            #:world-connectors #:world-extent #:connections #:collisions
            #:snap-spec #:to-ldraw #:gate #:private-beta))
+
+(defpackage :brickyard-api
+  (:use :common-lisp)
+  (:export #:use-build #:new-build #:parts #:report #:joints #:describe-build
+           #:add-part #:move-part #:turn-part #:swing-part #:color-part #:copy-part
+           #:remove-part #:clear-build))
