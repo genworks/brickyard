@@ -22,6 +22,29 @@ place it fits.
 ;; => (:type :brick :size (2 2) :color :yellow :at (20 40 32))
 ```
 
+## The editor
+
+Loading the system publishes `/brickyard` on the Gendl web server.  It
+opens a new build (a small sample chassis; `?new=empty` for none) at
+its own address, `/brickyard?b=<id>`, and keeps it in
+`/projects/.state/brickyard-<id>.sexp`, so the address keeps working
+across restarts.
+
+- Click a part in the bin to add it: onto the selected part when it
+  fits there (in whichever orientation needs the least moving), off to
+  the side otherwise.
+- Drag a part to slide it across the build; on release it drops onto
+  the nearest place it fits, landing on top before going underneath.
+- Arrow keys nudge the selected part a stud, PgUp and PgDn a plate; R,
+  T and E turn, tilt and roll it a quarter; C copies it on top; Delete
+  removes it; a swatch recolors it.
+- The report counts joined pairs and names overlapping and loose
+  parts, and keeps the parts list.
+
+The page is X_ITE, an X3D browser: each part is its own Transform with
+a PlaneSensor, so dragging runs in the browser and only the release
+goes to the server, which answers with the parts that changed.
+
 ## Part specs
 
 ```lisp

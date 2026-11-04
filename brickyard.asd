@@ -9,4 +9,5 @@
  :version "20261103" :depends-on nil :around-compile
  "gendl-asdf:around-compile" :components
  ((:file "source/package") (:file "source/specs")
-  (:file "source/parts") (:file "source/assembly")))
+  (:file "source/parts") (:file "source/assembly")
+  (:file "source/editor")))

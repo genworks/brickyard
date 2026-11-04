@@ -1,1 +1,1 @@
-("package" "specs" "parts" "assembly")
+("package" "specs" "parts" "assembly" "editor")

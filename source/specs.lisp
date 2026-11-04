@@ -272,6 +272,87 @@ could be brought onto a mating connector of the others, nearest first."
           (when move (push (cons (sqrt (dot move move)) move) result)))))
     (stable-sort (nreverse result) #'< :key #'first)))
 
+(defun collides-with-any-p (spec others)
+  (some #'(lambda (o) (collide-p spec o)) others))
+
+(defun move-rank (move)
+  "List compared in order: the plan distance, rising before sinking, then
+how far up or down."
+  (destructuring-bind (dx dy dz) move
+    (list (round (sqrt (+ (* dx dx) (* dy dy)))) (if (minusp dz) 1 0) (abs dz))))
+
+(defun rank< (a b)
+  (cond ((null a) nil)
+        ((< (first a) (first b)) t)
+        ((> (first a) (first b)) nil)
+        (t (rank< (rest a) (rest b)))))
+
+(defun drop-spec (spec others &key (reach 40) (free? t))
+  "The spec as it lands when let go where it stands: onto the clear joint
+nearest in plan within reach LDU, any height, landing on top before going
+underneath; failing that, when free? and it is clear where it is, left
+there on a 10 LDU grid (it will be loose); else nil."
+  (let* ((spec (move-spec spec (mapcar #'round (spec-at spec))))
+         (moves (remove-if #'(lambda (m) (> (first (move-rank m)) reach))
+                           (mapcar #'rest (snap-moves spec others)))))
+    (or (dolist (move (stable-sort moves #'rank< :key #'move-rank))
+          (let ((moved (move-spec spec (v+ (spec-at spec) move))))
+            (unless (collides-with-any-p moved others) (return moved))))
+        (when free?
+          (let ((gridded (move-spec spec (mapcar #'(lambda (x) (* 10 (round x 10))) (spec-at spec)))))
+            (unless (collides-with-any-p gridded others) gridded))))))
+
+;;
+;; Turning: quarter turns about the world's axes, the anchor staying put.
+;;
+
+(defun quarter-turn (about v)
+  (destructuring-bind (x y z) v
+    (ecase about
+      (:z (list (- y) x z))
+      (:x (list x (- z) y))
+      (:y (list z y (- x))))))
+
+(defun turn-spec (spec about)
+  (let ((new (copy-list spec)))
+    (setf (getf new :up) (axis-key (quarter-turn about (axis (spec-up spec))))
+          (getf new :rear) (axis-key (quarter-turn about (axis (spec-rear spec)))))
+    new))
+
+(defparameter *orientations*
+  (let (result)
+    (dolist (up '(:top :bottom :right :left :rear :front) (nreverse result))
+      (dolist (rear '(:rear :front :right :left :top :bottom))
+        (when (zerop (dot (axis up) (axis rear))) (push (list up rear) result)))))
+  "List of the 24 (up rear) pairs.")
+
+(defun fit-spec (spec others &key (reach 40))
+  "The spec snapped onto the build in whichever of the 24 orientations
+needs the shortest move, its own orientation winning a tie; nil when none
+snaps within reach."
+  (let ((own (list (spec-up spec) (spec-rear spec))) best best-distance)
+    (dolist (orientation (cons own (remove own *orientations* :test #'equal)) best)
+      (let* ((turned (let ((new (copy-list spec)))
+                       (setf (getf new :up) (first orientation) (getf new :rear) (second orientation))
+                       new))
+             (dropped (drop-spec turned others :reach reach :free? nil)))
+        (when dropped
+          (let* ((move (v- (spec-at dropped) (spec-at spec)))
+                 (distance (sqrt (dot move move))))
+            (when (or (null best) (< distance best-distance))
+              (setf best dropped best-distance distance))))))))
+
+;;
+;; Part ids: an editor names parts by id, which survives the removal of
+;; others where an index does not.
+;;
+
+(defun spec-id (spec) (getf spec :id))
+
+(defun ensure-ids (specs)
+  (let ((next (1+ (reduce #'max specs :key #'(lambda (s) (or (spec-id s) -1)) :initial-value -1))))
+    (mapcar #'(lambda (s) (if (spec-id s) s (prog1 (list* :id next s) (incf next)))) specs)))
+
 (defun snap-spec (spec others &key (radius *snap-radius*))
   "The spec moved onto its nearest clear joint with the others within
 radius LDU, or nil.  Its :at is rounded to whole LDU first."
