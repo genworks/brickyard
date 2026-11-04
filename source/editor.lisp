@@ -33,6 +33,8 @@
 
 (defvar *builds-lock* (bt:make-lock "brickyard builds"))
 
+(defvar *agent* nil "The prompt box's sexp-agent, when prompting has opened it (api.lisp).")
+
 (defparameter *palette*
   '(("Bricks" (:brick (1 1)) (:brick (1 2)) (:brick (1 4)) (:brick (2 2)) (:brick (2 4)) (:brick (2 6)))
     ("Plates" (:plate (1 2)) (:plate (1 4)) (:plate (2 2)) (:plate (2 4)) (:plate (2 8)) (:plate (4 8)) (:plate (6 10)))
@@ -417,6 +419,15 @@ nil when there is none."
         (:|x3d-canvas| :id "canvas" :|contextMenu| "false" :|splashScreen| "false"
          :|notifications| "false" :|timings| "false")
         (:div :id "message")
+        (when *agent*
+          (cl-who:htm
+           (:form :id "prompt"
+            (:div :class "prompt-row"
+             (:textarea :id "prompt-text" :rows "1" :maxlength "2000"
+                        :placeholder "Describe what to build: a small car with four wheels" "")
+             (:button :type "submit" :id "prompt-go" "Build")
+             (:button :type "button" :id "prompt-undo" :hidden "hidden" "Undo"))
+            (:div :id "prompt-reply" :hidden "hidden"))))
         (:script :type "model/x3d+xml" :id "scene" (cl-who:str (scene-x3d))))
        (:aside :id "report"
         (:h2 "Build") (:div :id "summary")
@@ -561,6 +572,9 @@ an empty group the parts go into."
   (dolist (path '("/brickyard" "/brickyard/"))
     (net.aserve:publish :path path :server server :function (gated #'page-handler)))
   (net.aserve:publish :path "/brickyard/api" :server server :function (gated #'api-handler))
+  ;; named, not #': they are defined in api.lisp, after this file
+  (net.aserve:publish :path "/brickyard/api/prompt" :server server :function (gated 'prompt-handler))
+  (net.aserve:publish :path "/brickyard/api/reference" :server server :function (gated 'reference-handler))
   (net.aserve:publish :path "/brickyard/export" :server server :function (gated #'export-handler))
   (net.aserve:publish :path "/brickyard/import" :server server :function (gated #'import-handler))
   (net.aserve:publish-directory :prefix "/brickyard/static/" :server server

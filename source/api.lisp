@@ -283,3 +283,139 @@ to the side of the build."
   (format nil "~a~%## The parts bin~%~%~a"
           (uiop:read-file-string (merge-pathnames "api.md" *docs-directory*))
           (catalog-text)))
+
+;;
+;; The prompt box: a person says in words what to build, a model answers
+;; with forms of this API, and Gendl's sexp-agent runs them, the operators
+;; above with literal arguments and nothing else.  Without sexp-agent, or
+;; until prompting is called, the page has no box.
+;;
+;;   (brickyard:prompting "http://gate/llm/messages")
+;;
+;; A model can take longer than a proxy holds a request open, so a prompt
+;; runs on its own thread and the page asks after it: POST
+;; /brickyard/api/prompt with b and action start (and prompt), poll or
+;; undo.  One prompt at a time to a build.
+;;
+
+(defparameter *prompt-limit* 2000 "Integer. The most characters in a prompt.")
+
+(defparameter *history-turns* 6 "Integer. The earlier turns of a build sent with a prompt.")
+
+(defvar *prompts* (make-hash-table :test #'equal)
+  "Hash table from build id to :running, or the finished prompt's reply until it is asked for.")
+
+(defvar *histories* (make-hash-table :test #'equal)
+  "Hash table from build id to its turns, (prompt . model's text), oldest first.")
+
+(defvar *before-prompt* (make-hash-table :test #'equal)
+  "Hash table from build id to its specs before the last prompt: what undo restores.")
+
+(defun prompting (messages-url &key api-key-file)
+  "Open the prompt box, its model reached at messages-url: a gate that
+holds the key, or the API itself with api-key-file."
+  (unless (find-package :sexp-agent) (error "Load Gendl's sexp-agent first."))
+  (setf *agent* (uiop:symbol-call :sexp-agent :make-agent
+                                  :name "Brickyard" :package :brickyard-api :operators *operators*
+                                  :reference #'reference-text :messages-url messages-url
+                                  :api-key-file api-key-file)))
+
+(defun specs-change (before after)
+  "Values: the ids in after that are new or differ from before, and the ids gone."
+  (values (mapcar #'spec-id (remove-if #'(lambda (s) (member s before :test #'equal)) after))
+          (mapcar #'spec-id (remove-if #'(lambda (s) (find (spec-id s) after :key #'spec-id)) before))))
+
+(defun finished-prompt (id prompt answer)
+  "The reply to a prompt that has run, with the parts it changed; the turn joins the build's history."
+  (let* ((assembly (find-build id))
+         ;; a form the repair round put right is no failure
+         (failed (unless (getf answer :ok)
+                   (find-if-not #'(lambda (r) (getf r :ok)) (getf answer :results) :from-end t)))
+         (text (getf answer :assistant)))
+    (when text
+      (let ((turns (append (gethash id *histories*) (list (cons prompt text)))))
+        (setf (gethash id *histories*) (last turns *history-turns*))))
+    (multiple-value-bind (changed removed)
+        (specs-change (gethash id *before-prompt*) (the-object assembly part-specs))
+      (let ((reply (reply assembly :changed changed :removed removed :ok (getf answer :ok)
+                                   :message (or (getf answer :error)
+                                                (and failed (format nil "Stopped: ~a" (getf failed :error)))))))
+        (setf (gethash "reply" reply) (or (getf answer :reply) "")
+              (gethash "forms" reply) (coerce (getf answer :forms) 'vector))
+        reply))))
+
+(defun run-prompt (id prompt session)
+  "Ask the model, run what it answers on build id, and leave the reply in *prompts*."
+  (let* ((*api-build* id)
+         (agent *agent*)
+         (history (bt:with-lock-held (*builds-lock*) (gethash id *histories*)))
+         (state (bt:with-lock-held (*builds-lock*) (describe-assembly (find-build id))))
+         (answer (handler-case
+                     (uiop:symbol-call :sexp-agent :ask agent prompt
+                                       :state-text state :session-id session :history history)
+                   (serious-condition (e)
+                     (list :ok nil :error (format nil "The model did not answer: ~a" e))))))
+    (bt:with-lock-held (*builds-lock*)
+      (setf (gethash id *prompts*) (finished-prompt id prompt answer)))))
+
+(defun prompt-session (req id)
+  "The id the model's gate counts a person's spending under: their invite, else the build."
+  (let ((token (and (gate) (uiop:symbol-call :invite-gate :request-token (gate) req))))
+    (if token
+        (format nil "brickyard-~(~36r~)" (sxhash token))
+        (format nil "brickyard-~a" id))))
+
+(defun start-prompt (req id prompt)
+  (let ((prompt (string-trim '(#\Space #\Tab #\Newline #\Return) (or prompt ""))))
+    (cond ((null *agent*) (json-object :ok nil :message "There is no prompt box here."))
+          ((string= prompt "") (json-object :ok nil :message "Say what to build."))
+          ((> (length prompt) *prompt-limit*)
+           (json-object :ok nil :message (format nil "A prompt is at most ~a characters." *prompt-limit*)))
+          ((eq (gethash id *prompts*) :running)
+           (json-object :ok nil :message "A prompt is still running on this build."))
+          (t
+           (setf (gethash id *prompts*) :running
+                 (gethash id *before-prompt*) (the-object (find-build id) part-specs))
+           (let ((session (prompt-session req id)))
+             (bt:make-thread #'(lambda () (run-prompt id prompt session)) :name "brickyard prompt"))
+           (json-object :ok t :pending t)))))
+
+(defun poll-prompt (id)
+  (let ((state (gethash id *prompts*)))
+    (cond ((eq state :running) (json-object :ok t :pending t))
+          (state (remhash id *prompts*) state)
+          (t (json-object :ok t :idle t)))))
+
+(defun undo-prompt (id)
+  "The build as it stood before its last prompt."
+  (multiple-value-bind (before found?) (gethash id *before-prompt*)
+    (cond ((eq (gethash id *prompts*) :running)
+           (json-object :ok nil :message "A prompt is still running on this build."))
+          ((not found?) (json-object :ok nil :message "There is no prompt to undo."))
+          (t
+           (let* ((assembly (find-build id))
+                  (now (the-object assembly part-specs)))
+             (multiple-value-bind (changed removed) (specs-change now before)
+               (the-object assembly (set-slot! :part-specs before))
+               (save-build id assembly)
+               (remhash id *before-prompt*)
+               (remhash id *histories*)
+               (reply assembly :changed changed :removed removed)))))))
+
+(defun prompt-handler (req ent)
+  "POST b and action: start with prompt, poll, or undo."
+  (let* ((params (net.aserve:form-urlencoded-to-query (gwl:request-body-text req)))
+         (param #'(lambda (name) (cdr (assoc name params :test #'string=))))
+         (id (funcall param "b"))
+         (action (funcall param "action"))
+         (result (bt:with-lock-held (*builds-lock*)
+                   (cond ((null (find-build id)) (json-object :ok nil :message "No such build."))
+                         ((equal action "start") (start-prompt req id (funcall param "prompt")))
+                         ((equal action "poll") (poll-prompt id))
+                         ((equal action "undo") (undo-prompt id))
+                         (t (json-object :ok nil :message "Unknown action."))))))
+    (respond req ent "application/json"
+             (with-output-to-string (s) (yason:encode result s)))))
+
+(defun reference-handler (req ent)
+  (respond req ent "text/markdown; charset=utf-8" (reference-text)))

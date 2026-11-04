@@ -76,6 +76,15 @@ for each thing the page does: `add-part`, `move-part`, `turn-part`,
 and answering plists, with a refusal an error saying why.
 [docs/api.md](docs/api.md) is the reference, with recipes.
 
+With Gendl's `sexp-agent` loaded, `(brickyard:prompting URL)` opens a
+prompt box on the page: a person says what to build, a language model
+at URL (a gate that holds the key, in production) answers with forms
+of this API, and they run in the sandbox, which admits only the
+operators with literal arguments.  A prompt runs on its own thread and
+the page asks after it, and Undo puts the build back as it stood before
+the prompt.  `GET /brickyard/api/reference` serves the reference the
+model reads.
+
 For a private beta, load Gendl's `invite-gate` before Brickyard and
 close the gate to a roster kept on the server:
 

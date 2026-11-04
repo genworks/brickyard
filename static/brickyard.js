@@ -66,7 +66,7 @@
 
   async function apply(reply) {
     say(reply.message || '');
-    (reply.removed || []).forEach(removePart);
+    removeParts(reply.removed || []);
     const changed = reply.parts || [];
     if (changed.length > 1) await putParts(changed);
     else for (const p of changed) await putPart(p);
@@ -76,16 +76,18 @@
     if (selected !== null && ((reply.parts || []).length || (reply.removed || []).length)) askCarried(selected);
   }
 
-  function removePart(id) {
-    const part = parts.get(id);
-    if (!part) return;
-    group.removeChildren = new X3D.MFNode(part.outer);
-    parts.delete(id);
+  // In one assignment: of several in one frame only the last takes effect,
+  // and the others' nodes stay on the screen with nothing behind them.
+  function removeParts(ids) {
+    const known = ids.filter(function (id) { return parts.has(id); });
+    if (!known.length) return;
+    group.removeChildren = new X3D.MFNode(...known.map(function (id) { return parts.get(id).outer; }));
+    known.forEach(function (id) { parts.delete(id); });
   }
 
   async function putPart(p) {
     const scene = await browser.createX3DFromString(p.x3d);
-    removePart(p.id);
+    removeParts([p.id]);
     group.addChildren = new X3D.MFNode(wire(scene, p));
   }
 
@@ -100,7 +102,7 @@
       return p.x3d.slice(p.x3d.indexOf(open) + open.length, p.x3d.lastIndexOf(close));
     }).join('');
     const scene = await browser.createX3DFromString(head + body + close + '</X3D>');
-    ps.forEach(function (p) { removePart(p.id); });
+    removeParts(ps.map(function (p) { return p.id; }));
     group.addChildren = new X3D.MFNode(...ps.map(function (p) { return wire(scene, p); }));
   }
 
@@ -253,6 +255,93 @@
     e.preventDefault();
   });
 
+  // The prompt box, when the server has one.  A prompt runs on the server
+  // and the page asks after it: a model can take longer than a proxy
+  // holds a request open.
+  const promptForm = document.getElementById('prompt');
+  const promptText = document.getElementById('prompt-text');
+  const promptGo = document.getElementById('prompt-go');
+  const promptUndo = document.getElementById('prompt-undo');
+  const promptReply = document.getElementById('prompt-reply');
+
+  function promptCall(args) {
+    const body = new URLSearchParams(Object.assign({ b: buildId }, args));
+    return fetch('/brickyard/api/prompt', { method: 'POST', body: body }).then(function (r) { return r.json(); });
+  }
+
+  function promptBusy(on) {
+    promptGo.disabled = on;
+    promptText.disabled = on;
+    promptGo.textContent = on ? 'Building ...' : 'Build';
+  }
+
+  function promptSay(text, forms) {
+    promptReply.textContent = text || '';
+    if (forms && forms.length) {
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      const code = document.createElement('pre');
+      summary.textContent = forms.length + (forms.length === 1 ? ' step' : ' steps');
+      code.textContent = forms.join('\n');
+      details.append(summary, code);
+      promptReply.append(details);
+    }
+    promptReply.hidden = !text && !(forms && forms.length);
+  }
+
+  async function promptFinish(reply) {
+    promptBusy(false);
+    promptSay(reply.reply, reply.forms);
+    await apply(reply);
+    if ((reply.parts || []).length) browser.viewAll(0.5);
+    promptUndo.hidden = false;
+  }
+
+  // Ask after the running prompt until it is done; a few failed asks in a
+  // row are the network's, more than that and the page stops asking.
+  function promptWait(failures) {
+    setTimeout(function () {
+      promptCall({ action: 'poll' })
+        .then(function (reply) {
+          if (reply.pending) promptWait(0);
+          else if (reply.idle) promptBusy(false);
+          else promptFinish(reply);
+        })
+        .catch(function (e) {
+          if (failures < 5) promptWait(failures + 1);
+          else { promptBusy(false); say('The server did not answer: ' + e); }
+        });
+    }, 2000);
+  }
+
+  if (promptForm) {
+    promptForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      const text = promptText.value.trim();
+      if (!text || promptGo.disabled) return;
+      promptBusy(true);
+      promptSay('');
+      promptCall({ action: 'start', prompt: text })
+        .then(function (reply) {
+          if (reply.ok) { promptText.value = ''; promptWait(0); }
+          else { promptBusy(false); say(reply.message); }
+        })
+        .catch(function (err) { promptBusy(false); say('The server did not answer: ' + err); });
+    });
+    promptText.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); promptForm.requestSubmit(); }
+    });
+    promptUndo.addEventListener('click', function () {
+      promptCall({ action: 'undo' })
+        .then(function (reply) {
+          promptUndo.hidden = true;
+          promptSay('');
+          return apply(reply);
+        })
+        .catch(function (err) { say('The server did not answer: ' + err); });
+    });
+  }
+
   // Import: the chosen file's text goes to the server, which makes a new
   // build of it and says what it left out; the page then opens that build.
   document.getElementById('import-file').addEventListener('change', function (e) {
@@ -280,6 +369,11 @@
     browser.viewAll(0);
     if (document.body.dataset.note) say(document.body.dataset.note);
     document.querySelector('#swatches .swatch[data-color="' + color + '"]').classList.add('chosen');
+    // a page reloaded while a prompt ran picks it up again
+    if (promptForm) promptCall({ action: 'poll' }).then(function (reply) {
+      if (reply.pending) { promptBusy(true); promptWait(0); }
+      else if (!reply.idle) promptFinish(reply);
+    });
   }
 
   X3D(start, function (e) { say('X_ITE did not start: ' + e); });

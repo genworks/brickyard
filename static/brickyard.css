@@ -110,6 +110,50 @@ button.swatch.chosen { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 #message.shown { opacity: 0.95; }
 
+#prompt {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.prompt-row { display: flex; gap: 6px; align-items: flex-start; }
+
+#prompt-text {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+
+#prompt button {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+#prompt button:hover:enabled { border-color: var(--accent); }
+#prompt button:disabled { color: var(--muted); cursor: default; }
+
+#prompt-reply { margin-top: 6px; max-height: 30vh; overflow-y: auto; }
+#prompt-reply summary { color: var(--muted); cursor: pointer; }
+#prompt-reply pre { margin: 4px 0 0; font-size: 12px; white-space: pre-wrap; }
+
 #summary p { margin: 2px 0; }
 #summary p.warn { color: var(--warn); }
 
