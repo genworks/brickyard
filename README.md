@@ -94,13 +94,23 @@ goes to the server, which answers with the parts that changed.
 | `:axle-pin` | `([1 or 2])`: studs of pin; one stud of axle | where the library has it |
 | `:bush` | none: a stud long, on an axle | its middle |
 | `:cross-block` | `([2 or 3])`: an axle hole across it, pin holes through it | where the library has it |
-| `:l-beam` | `(3 5)` | the end hole of the long arm |
-| `:round-tile` | none: 1 by 1 | center of the bottom face |
+| `:l-beam` | `(3 5)` or `(2 4)` (its end hole an axle hole) | the end hole of the long arm |
+| `:t-beam` | none: 3 by 3 | the end hole of the stem |
+| `:angle-connector` | `([1 or 2])`: one arm, or two in line | the hub |
+| `:axle-joiner` | `([2 or 3])` studs long | its middle |
+| `:pin-joiner`, `:stop-pin`, `:hole-pin` | none | as the library has them |
+| `:pin-block`, `:axle-block` | none: the 1 by 3 cross blocks with four pins, and axle/pin/axle | the middle hole |
+| `:round-tile`, `:round-plate` | none: 1 by 1 | center of the bottom face |
+| `:rim`, `:tyre` | none: rim 20 by 30, tyre 48 by 20; the tyre seats on the rim | the center |
 
-The Technic connectors follow the LDraw library's own parts (6558,
-4274, 43093, 11214, 3713, 6536, 42003, 32526, 98138): their pins,
-holes, studs and axle ends were placed from the library files and
-checked against them in every orientation.
+The Technic connectors, beams, gears 12 and 20 (double bevel), the
+round plate and the rim and tyre follow the LDraw library's own parts:
+their pins, holes, studs and axle ends were placed from the library
+files and checked against them in every orientation.  A rim turns with
+its axle like a wheel, and a tyre seated on it is what the build
+stands on.  Parts may run into each other by up to 2 LDU (0.8 mm)
+without counting as an overlap: real parts are chamfered where
+Brickyard's boxes are square.
 
 The wheel, motor and controller are this program's own designs, sized
 to the stud grid.  A wheel has an axle hole through its hub; a motor

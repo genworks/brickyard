@@ -115,7 +115,15 @@ LDraw library puts them."
       (:half-pin '((:pin -20 0) (:collar -1 1) (:stud 0 4)))
       (:axle-pin (if (eql (first size) 2)
                      '((:pin -30 10) (:collar 9 11) (:axle 10 30))
-                     '((:pin -20 0) (:collar -1 1) (:axle 0 20)))))))
+                     '((:pin -20 0) (:collar -1 1) (:axle 0 20))))
+      (:stop-pin '((:bush -30 -10) (:pin -10 30) (:collar -11 -9)))
+      (:hole-pin '((:pin -23 -10) (:body -10 10) (:pin 10 23)))
+      (:pin-joiner '((:sleeve -20 20)))
+      (:axle-joiner (if (eql (first size) 2) '((:sleeve -20 20)) '((:sleeve -30 30)))))))
+
+(defparameter *segment-radii*
+  '(:pin 2.4 :stud 2.4 :collar 3.0 :bush 3.2 :sleeve 3.6 :body 4.0)
+  "Plist. Millimeters: the radius each kind of round segment is drawn at.")
 
 
 (define-object axle-segment (base-object)
@@ -143,7 +151,7 @@ LDraw library puts them."
            :sequence (:size (length (the segments)))
            :pseudo-inputs (segment)
            :segment (nth (the-child index) (the segments))
-           :radius (if (eql (first (the-child segment)) :collar) 3.0 2.4)
+           :radius (getf *segment-radii* (first (the-child segment)) 2.4)
            :length (- (mm (- (third (the-child segment)) (second (the-child segment)))) 0.1)
            :center (the (local-point (list 0 (/ (+ (second (the-child segment)) (third (the-child segment))) 2) 0)))
            :display-controls (the display-controls))))
@@ -173,22 +181,88 @@ LDraw library puts them."
          :display-controls (the display-controls))))
 
 
-(define-object l-beam (part-mixin)
-  :documentation (:description "A Technic L-beam 3 by 5: holes through along its own :rear, five up along :top from the anchor to the corner, three along :right from the corner.")
+(define-object flat-beam (part-mixin)
+  :documentation (:description "A Technic beam of several arms in one plane -- the L-beams, the T-beam --
+drawn from its boxes, rounded at its holes' ends; holes through along its own :rear.")
+
+  :computed-slots
+  ((boxes (local-boxes (the spec)))
+   (caps (case (the part-type)
+           (:t-beam '((0 0 0) (-20 0 40) (20 0 40)))
+           (t (if (equal (the size) '(2 4)) '((0 0 0) (0 0 60) (20 0 60)) '((0 0 0) (0 0 80) (40 0 80)))))))
 
   :objects
   ((arms :type 'box
-         :sequence (:size 2)
-         :width (if (zerop (the-child index)) 16.0 7.2)
-         :height (if (zerop (the-child index)) 7.2 32.0)
+         :sequence (:size (length (the boxes)))
+         :pseudo-inputs (arm-box)
+         :arm-box (nth (the-child index) (the boxes))
+         :width (- (mm (- (first (second (the-child arm-box))) (first (first (the-child arm-box))))) 0.1)
          :length 7.9
-         :center (the (local-point (if (zerop (the-child index)) '(20 0 80) '(0 0 40))))
+         :height (- (mm (- (third (second (the-child arm-box))) (third (first (the-child arm-box))))) 0.1)
+         :center (the (local-point (mapcar #'(lambda (lo hi) (/ (+ lo hi) 2)) (first (the-child arm-box)) (second (the-child arm-box)))))
          :display-controls (the display-controls))
    (end-caps :type 'cylinder
-         :sequence (:size 3)
+         :sequence (:size (length (the caps)))
          :radius 3.6 :length 7.9
-         :center (the (local-point (nth (the-child index) '((0 0 0) (0 0 80) (40 0 80)))))
+         :center (the (local-point (nth (the-child index) (the caps))))
          :display-controls (the display-controls))))
+
+
+(define-object angle-connector (part-mixin)
+  :documentation (:description "A Technic angle connector: a hub with a pin hole across it along :right, and one
+arm down (#1) or one each way (#2) along :top, each with an axle hole.")
+
+  :objects
+  ((hub :type 'cylinder
+        :radius 4.0 :length 7.9
+        :orientation (alignment :rear (the (face-normal-vector :right)))
+        :display-controls (the display-controls))
+   (arms :type 'box
+         :sequence (:size (if (eql (first (the size)) 2) 2 1))
+         :width 6.4 :length 6.4 :height 7.9
+         :center (the (local-point (list 0 0 (if (zerop (the-child index)) -20 20))))
+         :display-controls (the display-controls))))
+
+
+(define-object block3 (part-mixin)
+  :documentation (:description "A Technic cross block 1 by 3 along :rear: the axle/pin/axle one, or the
+pin/pin/pin one with four pins standing up and down.")
+
+  :objects
+  ((body :type 'box
+         :width 7.8 :height 7.8 :length 23.8
+         :display-controls (the display-controls))
+   (pins :type 'cylinder
+         :sequence (:size (if (eql (the part-type) :pin-block) 4 0))
+         :radius 2.4 :length 7.9
+         :center (the (local-point (list 0 (if (evenp (the-child index)) -20 20) (if (< (the-child index) 2) -20 20))))
+         :orientation (alignment :rear (the (face-normal-vector :top)))
+         :display-controls (the display-controls))))
+
+
+(define-object round-plate (part-mixin)
+  :documentation (:description "A round plate 1 by 1: a disk a plate high, a stud on top.")
+
+  :objects
+  ((disk :type 'cylinder
+         :radius 3.9 :length 3.2
+         :center (the (local-point '(0 0 4)))
+         :orientation (alignment :rear (the (face-normal-vector :top)))
+         :display-controls (the display-controls))))
+
+
+(define-object rim (part-mixin)
+  :documentation (:description "A wheel rim 20 by 30 turning on an axle along :rear.")
+
+  :objects
+  ((drum :type 'cylinder :radius 15.0 :length 19.8 :display-controls (the display-controls))))
+
+
+(define-object tyre (part-mixin)
+  :documentation (:description "A tyre 48 by 20 that seats on a rim along :rear.")
+
+  :objects
+  ((tread :type 'cylinder :radius 24.4 :length 19.4 :display-controls (the display-controls))))
 
 
 (define-object round-tile (part-mixin)
@@ -300,11 +374,16 @@ LDraw library puts them."
     ((:brick :plate :tile :technic-brick) 'brick)
     (:beam 'beam)
     (:axle 'axle)
-    ((:pin :half-pin :axle-pin) 'pin)
+    ((:pin :half-pin :axle-pin :stop-pin :hole-pin :pin-joiner :axle-joiner) 'pin)
     (:bush 'bush)
     (:cross-block 'cross-block)
-    (:l-beam 'l-beam)
+    ((:l-beam :t-beam) 'flat-beam)
+    (:angle-connector 'angle-connector)
+    ((:pin-block :axle-block) 'block3)
     (:round-tile 'round-tile)
+    (:round-plate 'round-plate)
+    (:rim 'rim)
+    (:tyre 'tyre)
     (:wheel 'wheel)
     (:gear 'gear)
     (:motor 'motor)

@@ -53,16 +53,29 @@ through along Y, ours along :rear with its holes through along :right.")
      ((4 8) . "3035") ((6 10) . "3033"))
     (:tile ((1 2) . "3069b") ((2 2) . "3068b"))
     (:technic-brick (4 . "3701") (6 . "3894") (8 . "3702") (16 . "3703"))
-    (:beam (1 . "18654") (3 . "32523") (5 . "32316") (7 . "32524") (9 . "40490") (11 . "32525") (15 . "32278"))
-    (:axle (2 . "32062") (3 . "4519") (4 . "3705") (5 . "32073") (6 . "3706") (8 . "3707") (10 . "3737") (12 . "3708"))
+    (:beam (1 . "18654") (2 . "43857") (3 . "32523") (5 . "32316") (7 . "32524") (9 . "40490") (11 . "32525")
+     (13 . "41239") (15 . "32278"))
+    (:axle (2 . "32062") (3 . "4519") (4 . "3705") (5 . "32073") (6 . "3706") (7 . "44294") (8 . "3707")
+     (10 . "3737") (12 . "3708"))
+    (:angle-connector (1 . "32013") (2 . "32034"))
+    (:axle-joiner (2 . "59443") (3 . "26287"))
+    (:pin-joiner (nil . "62462"))
+    (:stop-pin (nil . "32054"))
+    (:hole-pin (nil . "87082"))
+    (:pin-block (nil . "48989"))
+    (:axle-block (nil . "32184"))
+    (:t-beam (nil . "60484"))
+    (:round-plate (nil . "6141"))
+    (:rim (nil . "56145"))
+    (:tyre (nil . "15413"))
     (:pin (2 . "3673") (3 . "6558"))
     (:half-pin (nil . "4274"))
     (:axle-pin (1 . "43093") (2 . "11214"))
     (:bush (nil . "3713"))
     (:cross-block (2 . "6536") (3 . "42003"))
-    (:l-beam ((3 5) . "32526"))
+    (:l-beam ((3 5) . "32526") ((2 4) . "32140"))
     (:round-tile (nil . "98138"))
-    (:gear (8 . "3647") (16 . "4019") (24 . "3648b") (40 . "3649")))
+    (:gear (8 . "3647") (12 . "32270") (16 . "4019") (20 . "18575") (24 . "3648b") (40 . "3649")))
   "Per type, an alist from size key to official part number.  The brick
 family's key is the two plan sizes, smaller first; the L-beam's its two
 arms; a part of one size has nil.")
@@ -77,7 +90,12 @@ blocks and the L-beam, whose Brickyard frames were drawn up from theirs.")
     (:gear ,*frame-along* (0 0 0)) (:bush ,*frame-along* (0 0 0))
     (:beam ,*frame-beam* (0 0 0))
     (:cross-block ,*frame-same* (0 0 0)) (:l-beam ,*frame-same* (0 0 0))
-    (:technic-brick ,*frame-across* (0 0 24)) (:round-tile ,*frame-across* (0 0 8)))
+    (:technic-brick ,*frame-across* (0 0 24)) (:round-tile ,*frame-across* (0 0 8))
+    (:stop-pin ,*frame-across* (0 0 0)) (:hole-pin ,*frame-across* (0 0 0)) (:pin-joiner ,*frame-across* (0 0 0))
+    (:axle-joiner ,*frame-along* (0 0 0)) (:rim ,*frame-along* (0 0 0)) (:tyre ,*frame-along* (0 0 0))
+    (:angle-connector ,*frame-same* (0 0 0)) (:pin-block ,*frame-same* (0 0 0))
+    (:axle-block ,*frame-same* (0 0 0)) (:t-beam ,*frame-same* (0 0 0))
+    (:round-plate ,*frame-across* (0 0 8)))
   "Per type outside the brick family, (frame offset) of its library parts,
 read from the library files: pins and axle-pins lie along X from their
 collar, the bush and gears turn about Z, beams hold their holes along Y.")
@@ -85,7 +103,9 @@ collar, the bush and gears turn about Z, beams hold their holes along Y.")
 (defun ldraw-key (type size)
   "The key a part of this type and size has in *ldraw-parts*."
   (case type
-    ((:half-pin :bush :round-tile) nil)
+    ((:half-pin :bush :round-tile :pin-joiner :stop-pin :hole-pin :pin-block :axle-block :t-beam
+      :round-plate :rim :tyre)
+     nil)
     (:l-beam size)
     (:technic-brick (second size))
     (t (first size))))
@@ -236,7 +256,10 @@ subfile for each kind of part the official library has no match for."
   "Alist of older or variant part numbers to the ones *ldraw-parts* names.")
 
 (defparameter *ldraw-color-names*
-  '((7 . :grey) (8 . :grey-slate-dark) (16 . :grey) (70 . :brown))
+  '((7 . :grey) (8 . :grey-slate-dark) (16 . :grey) (70 . :brown)
+    ;; rubber, as tyres and bands come (LDConfig.ldr)
+    (256 . :black) (511 . :white) (324 . :red) (273 . :blue) (65 . :yellow) (350 . :orange)
+    (490 . :lime) (375 . :grey) (496 . :grey) (10072 . :grey-slate-dark))
   "Alist of LDraw color codes beyond *ldraw-colors* to Brickyard colors.")
 
 (defparameter *ldraw-limits* '(:bytes 4000000 :parts 2000 :depth 8 :visits 50000)
@@ -354,8 +377,10 @@ document; one section named \"\" when the text has none."
                                                  (or (= (length word) (length stem))
                                                      (char= (char stem (length word)) #\-)))))
                             ;; longest first, so technic-brick is not read as brick
-                            '(:technic-brick :cross-block :round-tile :controller :axle-pin :half-pin
-                              :l-beam :motor :wheel :brick :plate :tile :beam :axle :bush :pin :gear)))
+                            '(:angle-connector :technic-brick :axle-joiner :cross-block :round-plate
+                              :round-tile :pin-joiner :axle-block :controller :pin-block :axle-pin :half-pin
+                              :stop-pin :hole-pin :l-beam :t-beam :motor :wheel :brick :plate :tile :beam
+                              :axle :bush :tyre :pin :gear :rim)))
              (rest (and type (string-left-trim "-" (subseq stem (length (symbol-name type))))))
              (size (and type (if (string= rest "")
                                  nil

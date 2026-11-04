@@ -47,7 +47,9 @@ still pull the part onto it (three studs).")
   '(:brick :red :plate :blue :tile :yellow :technic-brick :grey
     :beam :grey-light :axle :black :pin :black
     :wheel :grey-light :motor :grey-light :controller :white :gear :grey
-    :half-pin :grey :axle-pin :blue :bush :grey :cross-block :grey :l-beam :grey-light :round-tile :white))
+    :half-pin :grey :axle-pin :blue :bush :grey :cross-block :grey :l-beam :grey-light :round-tile :white
+    :angle-connector :grey :axle-joiner :grey :pin-joiner :grey :stop-pin :grey :hole-pin :black
+    :pin-block :grey :axle-block :grey :t-beam :grey-light :round-plate :white :rim :grey-light :tyre :black))
 
 (defun mm (ldu) (* ldu *mm-per-ldu*))
 
@@ -110,8 +112,12 @@ brick family, (n) for beams and axles, () for a pin."
       (:pin (list (or (first size) 2)))
       (:axle-pin (list (or (first size) 1)))
       (:cross-block (list (or (first size) 2)))
-      (:l-beam (list 3 5))
-      ((:half-pin :bush :round-tile :motor :controller) nil))))
+      (:l-beam (if (equal size '(2 4)) (list 2 4) (list 3 5)))
+      (:angle-connector (list (or (first size) 1)))
+      (:axle-joiner (list (or (first size) 3)))
+      ((:half-pin :bush :round-tile :motor :controller :pin-joiner :stop-pin :hole-pin
+        :pin-block :axle-block :t-beam :round-plate :rim :tyre)
+       nil))))
 
 (defun move-spec (spec at)
   (let ((new (copy-list spec))) (setf (getf new :at) at) new))
@@ -130,10 +136,10 @@ teeth add up to 32 mesh two studs apart (8 and 24, 16 and 16)."
   (* 5/4 teeth))
 
 (defun gear-half (teeth)
-  "LDU. Half a gear's tooth width, as the LDraw library draws them: 8 and
-16 teeth are a stud wide, larger gears half a stud.  Every gear's hub is
-a stud wide."
-  (if (<= teeth 16) 10 5))
+  "LDU. Half a gear's tooth width, as the LDraw library draws them: the
+24 and 40 tooth spur gears are half a stud, the rest (8, 16, and the 12
+and 20 tooth double bevels) a stud.  Every gear's hub is a stud wide."
+  (if (member teeth '(24 40)) 5 10))
 
 (defun row-offset (j n)
   "LDU from the middle of a row of n places, 20 apart, to place j."
@@ -203,9 +209,58 @@ a stud wide."
       ;; the L-beam, as the library has it: holes through along :rear, the
       ;; long arm's end hole at the anchor, five holes up along :top to the
       ;; corner, and from the corner three along :right
+      ;; (the 2 by 4's end hole is an axle hole)
       (:l-beam
+       (if (equal size '(2 4))
+           (cons (make-connector :kind :axle-hole :point '(0 0 0) :dir '(0 1 0) :half 10)
+                 (mapcar #'(lambda (p) (make-connector :kind :pin-hole :point p :dir '(0 1 0) :half 10))
+                         '((0 0 20) (0 0 40) (0 0 60) (20 0 60))))
+           (mapcar #'(lambda (p) (make-connector :kind :pin-hole :point p :dir '(0 1 0) :half 10))
+                   '((0 0 0) (0 0 20) (0 0 40) (0 0 60) (0 0 80) (20 0 80) (40 0 80)))))
+      ;; the T-beam: a stem of holes up :top from the anchor, a bar of
+      ;; three across :right at its head, all through along :rear
+      (:t-beam
        (mapcar #'(lambda (p) (make-connector :kind :pin-hole :point p :dir '(0 1 0) :half 10))
-               '((0 0 0) (0 0 20) (0 0 40) (0 0 60) (0 0 80) (20 0 80) (40 0 80))))
+               '((0 0 0) (0 0 20) (-20 0 40) (0 0 40) (20 0 40))))
+      ;; angle connectors: a pin hole across the hub along :right, an axle
+      ;; hole in each arm along :top, one arm down (#1) or one each way (#2)
+      (:angle-connector
+       (cons (make-connector :kind :pin-hole :point '(0 0 0) :dir '(1 0 0) :half 10)
+             (mapcar #'(lambda (z) (make-connector :kind :axle-hole :point (list 0 0 z) :dir '(0 0 1) :half 10))
+                     (if (eql (first size) 2) '(-20 20) '(-20)))))
+      ;; joiners and the stop and hole pins lie along :rear like pins
+      (:axle-joiner
+       (hole-row :axle-hole 0 (if (eql (first size) 2) '(-10 10) '(-20 20)) 0 '(0 1 0) 10))
+      (:pin-joiner
+       (hole-row :pin-hole 0 '(-10 10) 0 '(0 1 0) 10))
+      (:stop-pin
+       (append (hole-row :pin 0 '(0 20) 0 '(0 1 0) 10)
+               (list (make-connector :kind :axle-hole :point '(0 -20 0) :dir '(0 1 0) :half 10))))
+      (:hole-pin
+       (append (hole-row :pin 0 '(-20 20) 0 '(0 1 0) 10)
+               (list (make-connector :kind :pin-hole :point '(0 0 0) :dir '(0 0 1) :half 10))))
+      ;; 1 by 3 blocks along :rear: pin holes across at the ends and through
+      ;; the middle, four pins standing out up and down (48989); or axle
+      ;; holes across at the ends, a pin hole through the middle (32184)
+      (:pin-block
+       (append (hole-row :pin-hole 0 '(-20 20) 0 '(1 0 0) 10)
+               (list (make-connector :kind :pin-hole :point '(0 0 0) :dir '(0 0 1) :half 10))
+               (mapcan #'(lambda (y) (mapcar #'(lambda (z) (make-connector :kind :pin :point (list 0 y z) :dir '(0 0 1) :half 10))
+                                             '(-20 20)))
+                       '(-20 20))))
+      (:axle-block
+       (append (hole-row :axle-hole 0 '(-20 20) 0 '(1 0 0) 10)
+               (list (make-connector :kind :pin-hole :point '(0 0 0) :dir '(0 0 1) :half 10))))
+      (:round-plate
+       (list (make-connector :kind :stud :point '(0 0 8) :dir '(0 0 1))
+             (make-connector :kind :socket :point '(0 0 0) :dir '(0 0 -1))))
+      ;; a rim turns on an axle along :rear, its axle hole a stud deep to
+      ;; one side; a tyre seats on it, the two sharing a center and an axis
+      (:rim
+       (list (make-connector :kind :axle-hole :point '(0 -10 0) :dir '(0 1 0) :half 10)
+             (make-connector :kind :rim-seat :point '(0 0 0) :dir '(0 1 0) :radius 38)))
+      (:tyre
+       (list (make-connector :kind :tyre-seat :point '(0 0 0) :dir '(0 1 0) :radius 38)))
       (:round-tile
        (list (make-connector :kind :socket :point '(0 0 0) :dir '(0 0 -1))))
       (:wheel
@@ -240,7 +295,18 @@ a stud wide."
       (:axle-pin (if (eql (first size) 2) (list '(-6 -30 -6) '(6 30 6)) (list '(-6 -20 -6) '(6 20 6))))
       (:bush (list '(-9 -10 -9) '(9 10 9)))
       (:cross-block (if (eql (first size) 3) (list '(-10 -30 -10) '(10 30 10)) (list '(-10 -10 -10) '(10 30 10))))
-      (:l-beam (list '(-9 -10 -9) '(49 10 89)))
+      (:l-beam (if (equal size '(2 4)) (list '(-9 -10 -9) '(29 10 69)) (list '(-9 -10 -9) '(49 10 89))))
+      (:t-beam (list '(-29 -10 -9) '(29 10 49)))
+      (:angle-connector (if (eql (first size) 2) (list '(-10 -10 -30) '(10 10 30)) (list '(-10 -10 -30) '(10 10 10))))
+      (:axle-joiner (if (eql (first size) 2) (list '(-8 -20 -8) '(8 20 8)) (list '(-8 -30 -8) '(8 30 8))))
+      (:pin-joiner (list '(-10 -20 -10) '(10 20 10)))
+      (:stop-pin (list '(-9 -30 -9) '(9 30 9)))
+      (:hole-pin (list '(-9 -23 -10) '(9 23 10)))
+      (:pin-block (list '(-10 -30 -30) '(10 30 30)))
+      (:axle-block (list '(-10 -30 -10) '(10 30 10)))
+      (:round-plate (list '(-10 -10 0) '(10 10 8)))
+      (:rim (list '(-38 -25 -38) '(38 25 38)))
+      (:tyre (list '(-62 -25 -62) '(62 25 62)))
       (:round-tile (list '(-10 -10 0) '(10 10 8)))
       (:wheel (destructuring-bind (d w) size
                 (list (list (* -10 d) (* -10 w) (* -10 d)) (list (* 10 d) (* 10 w) (* 10 d)))))
@@ -258,11 +324,29 @@ a stud wide."
                                 :dir (rotate rows (connector-dir c))))
             (local-connectors spec))))
 
+(defun ring-boxes (inner outer half)
+  "Four boxes that bound a ring from radius inner to outer round the part's
+:rear axis, half its length each way: a square tunnel down the middle."
+  (list (list (list (- outer) (- half) inner) (list outer half outer))
+        (list (list (- outer) (- half) (- outer)) (list outer half (- inner)))
+        (list (list (- outer) (- half) (- inner)) (list (- inner) half inner))
+        (list (list inner (- half) (- inner)) (list outer half inner))))
+
 (defun local-boxes (spec)
   "List of boxes, each two corners, that the part fills: its extent, or for
 an L-beam one box per arm, so a part in the crook of the L is clear."
   (case (spec-type spec)
-    (:l-beam (list (list '(-9 -10 -9) '(9 10 89)) (list '(-9 -10 71) '(49 10 89))))
+    (:l-beam (if (equal (spec-size spec) '(2 4))
+                 (list (list '(-9 -10 -9) '(9 10 69)) (list '(-9 -10 51) '(29 10 69)))
+                 (list (list '(-9 -10 -9) '(9 10 89)) (list '(-9 -10 71) '(49 10 89)))))
+    (:t-beam (list (list '(-9 -10 -9) '(9 10 49)) (list '(-29 -10 31) '(29 10 49))))
+    (:pin-block (list (list '(-10 -30 -10) '(10 30 10))
+                      (list '(-6 -26 -30) '(6 -14 30)) (list '(-6 14 -30) '(6 26 30))))
+    ;; a rim is a drum round a hub: the hub around its axle hole, and four
+    ;; slabs for the drum, leaving a tunnel along the axle for bushes; a
+    ;; tyre is the same ring further out, round the rim
+    (:rim (cons (list '(-8 -20 -8) '(8 0 8)) (ring-boxes 12 38 25)))
+    (:tyre (ring-boxes 38 62 25))
     (t (list (local-extent spec)))))
 
 (defun world-boxes (spec)
@@ -291,6 +375,7 @@ round hole turns freely; it is still held.")
   (let ((ka (connector-kind a)) (kb (connector-kind b)))
     (cond ((or (and (eql ka :stud) (eql kb :socket)) (and (eql ka :socket) (eql kb :stud))) :face)
           ((and (eql ka :gear) (eql kb :gear)) :mesh)
+          ((or (and (eql ka :rim-seat) (eql kb :tyre-seat)) (and (eql ka :tyre-seat) (eql kb :rim-seat))) :seat)
           ((or (member (cons ka kb) *axial-mates* :test #'equal)
                (member (cons kb ka) *axial-mates* :test #'equal))
            :axial))))
@@ -301,6 +386,10 @@ round hole turns freely; it is still held.")
     (:face (and (equal (connector-point a) (connector-point b))
                 (zero-vector-p (v+ (connector-dir a) (connector-dir b)))
                 :face))
+    ;; a tyre on its rim: one center, one axis
+    (:seat (and (equal (connector-point a) (connector-point b))
+                (zero-vector-p (cross (connector-dir a) (connector-dir b)))
+                :seat))
     (:axial (let ((d (v- (connector-point b) (connector-point a)))
                   (dir (connector-dir a)))
               (and (zero-vector-p (cross dir (connector-dir b)))
@@ -334,11 +423,20 @@ round hole turns freely; it is still held.")
   (%make-placed :spec spec :extent (world-extent spec) :boxes (world-boxes spec)
                 :connectors (world-connectors spec)))
 
+(defparameter *overlap-slack* 2
+  "LDU. Boxes that run into each other by no more than this along some axis
+do not collide: real parts are chamfered where these boxes are square, and
+models built in other programs sit that close (0.8 mm).")
+
 (defun boxes-overlap-p (pa pb)
-  "True when the two parts' boxes share volume: their extents, then each of their boxes."
-  (and (extents-overlap-p (placed-extent pa) (placed-extent pb))
-       (some #'(lambda (a) (some #'(lambda (b) (extents-overlap-p a b)) (placed-boxes pb)))
-             (placed-boxes pa))))
+  "True when the two parts' boxes share volume, deeper than *overlap-slack*
+along every axis: their extents, then each of their boxes."
+  (flet ((deep-p (ea eb)
+           (every #'(lambda (alo ahi blo bhi) (and (< (+ alo *overlap-slack*) bhi) (< (+ blo *overlap-slack*) ahi)))
+                  (first ea) (second ea) (first eb) (second eb))))
+    (and (deep-p (placed-extent pa) (placed-extent pb))
+         (some #'(lambda (a) (some #'(lambda (b) (deep-p a b)) (placed-boxes pb)))
+               (placed-boxes pa)))))
 
 (defun extents-overlap-p (ea eb)
   "True when the two boxes share volume, not merely a face."
@@ -365,7 +463,7 @@ round hole turns freely; it is still held.")
   "True when the parts take the same space and are not a pin or axle in
 its hole, nor two gears in mesh."
   (and (boxes-overlap-p pa pb)
-       (notany #'(lambda (j) (member (first j) '(:axial :mesh))) (placed-joints pa pb))))
+       (notany #'(lambda (j) (member (first j) '(:axial :mesh :seat))) (placed-joints pa pb))))
 
 (defstruct (survey (:constructor %make-survey)) placed pairs)
 
@@ -402,7 +500,7 @@ its hole, nor two gears in mesh."
   (mapcan #'(lambda (pair)
               (destructuring-bind (i j js) pair
                 (when (and (boxes-overlap-p (aref (survey-placed survey) i) (aref (survey-placed survey) j))
-                           (notany #'(lambda (k) (member (first k) '(:axial :mesh))) js))
+                           (notany #'(lambda (k) (member (first k) '(:axial :mesh :seat))) js))
                   (list (list i j)))))
           (survey-pairs survey)))
 
@@ -465,9 +563,9 @@ turns what sits on it as an axle does; its pin end turns freely.")
                    (progn
                      (case (aref types i)
                        ((:axle :axle-pin)
-                        (when (and (member (aref types j) '(:gear :wheel)) (held-p j :axle-hole i :axle))
+                        (when (and (member (aref types j) '(:gear :wheel :rim)) (held-p j :axle-hole i :axle))
                           (push (list j speed) result)))
-                       ((:gear :wheel)
+                       ((:gear :wheel :rim)
                         (when (and (member (aref types j) *shafts*) (held-p i :axle-hole j :axle))
                           (push (list j speed) result))
                         (when (and (eql (aref types i) :gear) (eql (aref types j) :gear)
@@ -489,7 +587,7 @@ turns what sits on it as an axle does; its pin end turns freely.")
                          (setf queue (append queue (onward i speed))))
                         ((/= known speed) (pushnew i jammed))))))
             (dotimes (w n)
-              (when (eql (aref types w) :wheel)
+              (when (member (aref types w) '(:wheel :rim))
                 (multiple-value-bind (speed seen?) (gethash w speeds)
                   (when seen? (push (list m w speed) drives))))))))
       (values (nreverse drives) (sort jammed #'<)))))
@@ -541,6 +639,8 @@ theirs, the others' connectors, may be given when they are known."
       (dolist (b theirs)
         (dolist (move (case (complementary-p a b)
                         (:face (when (zero-vector-p (v+ (connector-dir a) (connector-dir b)))
+                                 (list (v- (connector-point b) (connector-point a)))))
+                        (:seat (when (zero-vector-p (cross (connector-dir a) (connector-dir b)))
                                  (list (v- (connector-point b) (connector-point a)))))
                         (:axial (when (zero-vector-p (cross (connector-dir a) (connector-dir b)))
                                   (axial-moves a b)))))

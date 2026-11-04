@@ -36,14 +36,18 @@
 (defparameter *palette*
   '(("Bricks" (:brick (1 1)) (:brick (1 2)) (:brick (1 4)) (:brick (2 2)) (:brick (2 4)) (:brick (2 6)))
     ("Plates" (:plate (1 2)) (:plate (1 4)) (:plate (2 2)) (:plate (2 4)) (:plate (2 8)) (:plate (4 8)) (:plate (6 10)))
-    ("Tiles" (:tile (1 2)) (:tile (2 2)) (:round-tile nil))
+    ("Tiles" (:tile (1 2)) (:tile (2 2)) (:round-tile nil) (:round-plate nil))
     ("Technic" (:technic-brick (4)) (:technic-brick (8)) (:technic-brick (16))
-     (:beam (1)) (:beam (3)) (:beam (5)) (:beam (7)) (:beam (9)) (:beam (15)) (:l-beam (3 5))
-     (:axle (2)) (:axle (3)) (:axle (4)) (:axle (6)) (:axle (8)) (:axle (12))
-     (:gear (8)) (:gear (16)) (:gear (24)) (:gear (40)))
-    ("Connectors" (:pin (2)) (:pin (3)) (:half-pin nil) (:axle-pin (1)) (:axle-pin (2))
-     (:bush nil) (:cross-block (2)) (:cross-block (3)))
-    ("Robot" (:wheel (3 1)) (:wheel (4 2)) (:wheel (5 2)) (:wheel (7 3)) (:motor nil) (:controller nil)))
+     (:beam (1)) (:beam (2)) (:beam (3)) (:beam (5)) (:beam (7)) (:beam (9)) (:beam (13)) (:beam (15))
+     (:l-beam (2 4)) (:l-beam (3 5)) (:t-beam nil)
+     (:axle (2)) (:axle (3)) (:axle (4)) (:axle (6)) (:axle (7)) (:axle (8)) (:axle (12))
+     (:gear (8)) (:gear (12)) (:gear (16)) (:gear (20)) (:gear (24)) (:gear (40)))
+    ("Connectors" (:pin (2)) (:pin (3)) (:half-pin nil) (:stop-pin nil) (:hole-pin nil)
+     (:axle-pin (1)) (:axle-pin (2)) (:bush nil)
+     (:cross-block (2)) (:cross-block (3)) (:axle-block nil) (:pin-block nil)
+     (:angle-connector (1)) (:angle-connector (2)) (:axle-joiner (2)) (:axle-joiner (3)) (:pin-joiner nil))
+    ("Robot" (:wheel (3 1)) (:wheel (4 2)) (:wheel (5 2)) (:wheel (7 3)) (:rim nil) (:tyre nil)
+     (:motor nil) (:controller nil)))
   "List of (heading (type size) ...) for the page's parts bin.")
 
 (defparameter *colors*
@@ -128,8 +132,19 @@ nil when there is none."
     (:half-pin "Half pin")
     (:axle-pin (if (eql (first size) 2) "Axle-pin with 2L pin" "Axle-pin"))
     (:cross-block (format nil "Cross block 1x~a" (first size)))
-    (:l-beam "L-beam 3x5")
+    (:l-beam (format nil "L-beam ~{~a~^x~}" size))
+    (:t-beam "T-beam 3x3")
     (:round-tile "Round tile 1x1")
+    (:round-plate "Round plate 1x1")
+    (:angle-connector (format nil "Angle connector #~a" (first size)))
+    (:axle-joiner (if (eql (first size) 2) "Axle joiner" "Axle joiner 3L"))
+    (:pin-joiner "Pin joiner")
+    (:stop-pin "Pin 3 with stop bush")
+    (:hole-pin "Pin 3 with pin hole")
+    (:pin-block "Cross block 1x3 with 4 pins")
+    (:axle-block "Cross block 1x3 (axle/pin/axle)")
+    (:rim "Rim 20x30")
+    (:tyre "Tyre 48x20")
     (t (format nil "~:(~a~)~@[ ~a~]"
                (substitute #\Space #\- (string type))
                (case type
@@ -143,7 +158,13 @@ nil when there is none."
 (defun bin-label (type size)
   (case type
     (:pin (if (eql (first size) 3) "Pin 3" "Pin"))
-    (:half-pin "Half pin") (:bush "Bush") (:round-tile "Round 1x1") (:l-beam "L 3x5")
+    (:half-pin "Half pin") (:bush "Bush") (:round-tile "Round 1x1") (:round-plate "Round plate")
+    (:l-beam (format nil "L ~{~a~^x~}" size)) (:t-beam "T 3x3")
+    (:stop-pin "Stop pin") (:hole-pin "Hole pin") (:pin-joiner "Pin joiner")
+    (:axle-block "Cross A/P/A") (:pin-block "Cross 4 pins")
+    (:angle-connector (format nil "Angle #~a" (first size)))
+    (:axle-joiner (if (eql (first size) 2) "Joiner" "Joiner 3L"))
+    (:rim "Rim") (:tyre "Tyre")
     (:axle-pin (if (eql (first size) 2) "Axle-pin 2" "Axle-pin"))
     (:cross-block (format nil "Cross 1x~a" (first size)))
     (:motor "Motor") (:controller "Controller")
@@ -229,7 +250,10 @@ nil when there is none."
         ((string= op "add")
          (let* ((type (read-keyword (funcall param "type") '(:brick :plate :tile :technic-brick :beam :axle :pin
                                                               :wheel :motor :controller :gear :half-pin :axle-pin
-                                                              :bush :cross-block :l-beam :round-tile)))
+                                                              :bush :cross-block :l-beam :round-tile
+                                                              :angle-connector :axle-joiner :pin-joiner :stop-pin
+                                                              :hole-pin :pin-block :axle-block :t-beam :round-plate
+                                                              :rim :tyre)))
                 (size (read-size (funcall param "size")))
                 (color (read-keyword (funcall param "color") *colors*))
                 (near (let ((v (funcall param "near"))) (and v (find (read-number v) specs :key #'spec-id))))
