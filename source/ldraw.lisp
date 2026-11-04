@@ -57,7 +57,7 @@ through along Y, ours along :rear with its holes through along :right.")
      (13 . "41239") (15 . "32278"))
     (:axle (2 . "32062") (3 . "4519") (4 . "3705") (5 . "32073") (6 . "3706") (7 . "44294") (8 . "3707")
      (10 . "3737") (12 . "3708"))
-    (:angle-connector (1 . "32013") (2 . "32034"))
+    (:angle-connector (1 . "32013") (2 . "32034") (3 . "32016") (5 . "32015"))
     (:axle-joiner (2 . "59443") (3 . "26287"))
     (:pin-joiner (nil . "62462"))
     (:stop-pin (nil . "32054"))
@@ -75,7 +75,21 @@ through along Y, ours along :rear with its holes through along :right.")
     (:cross-block (2 . "6536") (3 . "42003"))
     (:l-beam ((3 5) . "32526") ((2 4) . "32140"))
     (:round-tile (nil . "98138"))
-    (:gear (8 . "3647") (12 . "32270") (16 . "4019") (20 . "18575") (24 . "3648b") (40 . "3649")))
+    (:gear (8 . "3647") (12 . "32270") (16 . "4019") (20 . "18575") (24 . "3648b") (40 . "3649"))
+    (:bent-beam (nil . "6629"))
+    (:cheese-slope (nil . "54200"))
+    (:split-cross-block (nil . "92907"))
+    (:triple-cross-block (nil . "63869"))
+    (:twin-cross-block (nil . "41678"))
+    (:axle-hub (nil . "10197"))
+    (:hole-axle (2 . "22961") (3 . "27940"))
+    (:stud-axle (nil . "6587"))
+    (:stop-axle (4 . "87083") (8 . "55013"))
+    (:axle-connector (nil . "32039"))
+    (:axle-beam (nil . "60483"))
+    (:h-beam (nil . "14720"))
+    (:cross-pin (nil . "15100"))
+    (:pin-axle (nil . "18651")))
   "Per type, an alist from size key to official part number.  The brick
 family's key is the two plan sizes, smaller first; the L-beam's its two
 arms; a part of one size has nil.")
@@ -95,7 +109,11 @@ blocks and the L-beam, whose Brickyard frames were drawn up from theirs.")
     (:axle-joiner ,*frame-along* (0 0 0)) (:rim ,*frame-along* (0 0 0)) (:tyre ,*frame-along* (0 0 0))
     (:angle-connector ,*frame-same* (0 0 0)) (:pin-block ,*frame-same* (0 0 0))
     (:axle-block ,*frame-same* (0 0 0)) (:t-beam ,*frame-same* (0 0 0))
-    (:round-plate ,*frame-across* (0 0 8)))
+    (:round-plate ,*frame-across* (0 0 8))
+    (:stop-axle ,*frame-across* (0 0 0)) (:cheese-slope ,*frame-across* (0 0 0))
+    ,@(mapcar #'(lambda (type) (list type *frame-same* '(0 0 0)))
+              '(:bent-beam :split-cross-block :triple-cross-block :twin-cross-block :axle-hub :hole-axle
+                :stud-axle :axle-connector :axle-beam :h-beam :cross-pin :pin-axle)))
   "Per type outside the brick family, (frame offset) of its library parts,
 read from the library files: pins and axle-pins lie along X from their
 collar, the bush and gears turn about Z, beams hold their holes along Y.")
@@ -382,10 +400,7 @@ document; one section named \"\" when the text has none."
                                                  (or (= (length word) (length stem))
                                                      (char= (char stem (length word)) #\-)))))
                             ;; longest first, so technic-brick is not read as brick
-                            '(:angle-connector :technic-brick :axle-joiner :cross-block :round-plate
-                              :round-tile :pin-joiner :axle-block :controller :pin-block :axle-pin :half-pin
-                              :stop-pin :hole-pin :l-beam :t-beam :motor :wheel :brick :plate :tile :beam
-                              :axle :bush :tyre :pin :gear :rim)))
+                            (sort (copy-list *part-types*) #'> :key #'(lambda (k) (length (symbol-name k))))))
              (rest (and type (string-left-trim "-" (subseq stem (length (symbol-name type))))))
              (size (and type (if (string= rest "")
                                  nil

@@ -31,9 +31,11 @@
   ((studs :type 'cylinder
           :sequence (:size (length (the stud-connectors)))
           :radius 2.4 :length 1.7
-          :center (the (local-point (connector-point (nth (the-child index) (the stud-connectors)))
-                                    :up 0.85))
-          :orientation (alignment :rear (the (face-normal-vector :top)))
+          :pseudo-inputs (connector)
+          :connector (nth (the-child index) (the stud-connectors))
+          :center (the (local-point (v+ (connector-point (the-child connector))
+                                        (mapcar #'(lambda (x) (* 17/8 x)) (connector-dir (the-child connector))))))
+          :orientation (alignment :rear (the (local-direction (connector-dir (the-child connector)))))
           :display-controls (the display-controls))
 
    (holes :type (:sequence (mapcar #'(lambda (c) (if (eql (connector-kind c) :axle-hole) 'axle-hole-mark 'cylinder))
@@ -44,14 +46,22 @@
           :radius 2.5
           :length (+ (mm (* 2 (connector-half (the-child connector)))) 0.1)
           :center (the (local-point (connector-point (the-child connector))))
-          :orientation (alignment :rear (the (face-normal-vector (axis-key (connector-dir (the-child connector))))))
+          :orientation (alignment :rear (the (local-direction (connector-dir (the-child connector)))))
           :display-controls (list :color :grey-slate-dark)))
 
   :functions
   ((local-point
     (ldu-point &key (up 0))
     (destructuring-bind (x y z) ldu-point
-      (translate (the center) :right (mm x) :rear (mm y) :up (+ (mm z) up))))))
+      (translate (the center) :right (mm x) :rear (mm y) :up (+ (mm z) up))))
+
+   (local-direction
+    (v)
+    "The world vector along the part's own direction v."
+    (destructuring-bind (x y z) v
+      (add-vectors (add-vectors (scalar*vector x (the (face-normal-vector :right)))
+                                (scalar*vector y (the (face-normal-vector :rear))))
+                   (scalar*vector z (the (face-normal-vector :top))))))))
 
 
 (define-object brick (part-mixin)
@@ -210,7 +220,9 @@ drawn from its boxes, rounded at its holes' ends; holes through along its own :r
 
 (define-object angle-connector (part-mixin)
   :documentation (:description "A Technic angle connector: a hub with a pin hole across it along :right, and one
-arm down (#1) or one each way (#2) along :top, each with an axle hole.")
+arm down (#1), one each way (#2) along :top, or one down and one bent from it (#3, #5), each with an axle hole.")
+
+  :computed-slots ((arm-directions (angle-arms (the size))))
 
   :objects
   ((hub :type 'cylinder
@@ -218,10 +230,37 @@ arm down (#1) or one each way (#2) along :top, each with an axle hole.")
         :orientation (alignment :rear (the (face-normal-vector :right)))
         :display-controls (the display-controls))
    (arms :type 'box
-         :sequence (:size (if (eql (first (the size)) 2) 2 1))
+         :sequence (:size (length (the arm-directions)))
+         :pseudo-inputs (direction)
+         :direction (nth (the-child index) (the arm-directions))
          :width 6.4 :length 6.4 :height 7.9
-         :center (the (local-point (list 0 0 (if (zerop (the-child index)) -20 20))))
+         :center (the (local-point (mapcar #'(lambda (x) (* 20 x)) (the-child direction))))
+         :orientation (alignment :top (the (local-direction (the-child direction)))
+                                 :right (the (face-normal-vector :right)))
          :display-controls (the display-controls))))
+
+
+(define-object boxed-part (part-mixin)
+  :documentation (:description "A part drawn as the boxes it fills, each turned with any turn its box carries:
+the cross blocks, the bent beam, the H-beam and the other odd connectors.")
+
+  :computed-slots ((boxes (local-boxes (the spec))))
+
+  :objects
+  ((blocks :type 'box
+           :sequence (:size (length (the boxes)))
+           :pseudo-inputs (corners turn)
+           :corners (nth (the-child index) (the boxes))
+           :turn (or (third (the-child corners)) '((1 0 0) (0 1 0) (0 0 1)))
+           :width (- (mm (- (first (second (the-child corners))) (first (first (the-child corners))))) 0.1)
+           :length (- (mm (- (second (second (the-child corners))) (second (first (the-child corners))))) 0.1)
+           :height (- (mm (- (third (second (the-child corners))) (third (first (the-child corners))))) 0.1)
+           :center (the (local-point (rotate (the-child turn)
+                                             (mapcar #'(lambda (lo hi) (/ (+ lo hi) 2))
+                                                     (first (the-child corners)) (second (the-child corners))))))
+           :orientation (alignment :right (the (local-direction (column (the-child turn) 0)))
+                                   :rear (the (local-direction (column (the-child turn) 1))))
+           :display-controls (the display-controls))))
 
 
 (define-object block3 (part-mixin)
@@ -373,7 +412,7 @@ pin/pin/pin one with four pins standing up and down.")
   (ecase (spec-type spec)
     ((:brick :plate :tile :technic-brick) 'brick)
     (:beam 'beam)
-    (:axle 'axle)
+    ((:axle :stop-axle) 'axle)
     ((:pin :half-pin :axle-pin :stop-pin :hole-pin :pin-joiner :axle-joiner) 'pin)
     (:bush 'bush)
     (:cross-block 'cross-block)
@@ -387,4 +426,7 @@ pin/pin/pin one with four pins standing up and down.")
     (:wheel 'wheel)
     (:gear 'gear)
     (:motor 'motor)
-    (:controller 'controller)))
+    (:controller 'controller)
+    ((:bent-beam :cheese-slope :split-cross-block :triple-cross-block :axle-hub :hole-axle :stud-axle
+      :axle-connector :twin-cross-block :axle-beam :h-beam :cross-pin :pin-axle)
+     'boxed-part)))

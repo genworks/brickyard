@@ -49,7 +49,18 @@ still pull the part onto it (three studs).")
     :wheel :grey-light :motor :grey-light :controller :white :gear :grey
     :half-pin :grey :axle-pin :blue :bush :grey :cross-block :grey :l-beam :grey-light :round-tile :white
     :angle-connector :grey :axle-joiner :grey :pin-joiner :grey :stop-pin :grey :hole-pin :black
-    :pin-block :grey :axle-block :grey :t-beam :grey-light :round-plate :white :rim :grey-light :tyre :black))
+    :pin-block :grey :axle-block :grey :t-beam :grey-light :round-plate :white :rim :grey-light :tyre :black
+    :bent-beam :grey-light :cheese-slope :white :split-cross-block :grey :triple-cross-block :grey
+    :axle-hub :grey :hole-axle :grey :stud-axle :grey :axle-connector :black :stop-axle :grey
+    :twin-cross-block :grey :axle-beam :grey-light :h-beam :grey-light :cross-pin :black :pin-axle :blue))
+
+(defparameter *part-types*
+  '(:brick :plate :tile :technic-brick :beam :axle :pin :wheel :motor :controller :gear :half-pin :axle-pin
+    :bush :cross-block :l-beam :round-tile :angle-connector :axle-joiner :pin-joiner :stop-pin
+    :hole-pin :pin-block :axle-block :t-beam :round-plate :rim :tyre
+    :bent-beam :cheese-slope :split-cross-block :triple-cross-block :axle-hub :hole-axle :stud-axle
+    :axle-connector :stop-axle :twin-cross-block :axle-beam :h-beam :cross-pin :pin-axle)
+  "List of every part type Brickyard has.")
 
 (defun mm (ldu) (* ldu *mm-per-ldu*))
 
@@ -146,6 +157,8 @@ brick family, (n) for beams and axles, () for a pin."
       ((:plate :tile) (list (first size) (second size) 1))
       (:technic-brick (list 1 (first size) 3))
       ((:beam :axle :gear) (list (first size)))
+      (:stop-axle (list (or (first size) 4)))
+      (:hole-axle (list (or (first size) 3)))
       (:wheel (list (first size) (or (second size) 2)))
       (:pin (list (or (first size) 2)))
       (:axle-pin (list (or (first size) 1)))
@@ -154,7 +167,9 @@ brick family, (n) for beams and axles, () for a pin."
       (:angle-connector (list (or (first size) 1)))
       (:axle-joiner (list (or (first size) 3)))
       ((:half-pin :bush :round-tile :motor :controller :pin-joiner :stop-pin :hole-pin
-        :pin-block :axle-block :t-beam :round-plate :rim :tyre)
+        :pin-block :axle-block :t-beam :round-plate :rim :tyre :bent-beam :cheese-slope
+        :split-cross-block :triple-cross-block :axle-hub :stud-axle :axle-connector :twin-cross-block
+        :axle-beam :h-beam :cross-pin :pin-axle)
        nil))))
 
 (defun move-spec (spec at)
@@ -193,6 +208,23 @@ and 20 tooth double bevels) a stud.  Every gear's hub is a stud wide."
 
 (defun hole-row (kind x ys z dir half)
   (mapcar #'(lambda (y) (make-connector :kind kind :point (list x y z) :dir dir :half half)) ys))
+
+(defun holes-at (kind dir points &optional (half 10))
+  (mapcar #'(lambda (p) (make-connector :kind kind :point p :dir dir :half half)) points))
+
+(defun angle-arms (size)
+  "List of unit vectors from an angle connector's hub along its arms: #1
+one down, #2 one each way along :top, #3 and #5 one down and one bent
+from it toward :front, 157.5 and 112.5 degrees off, as the library has them."
+  (ecase (first size)
+    (1 '((0 0 -1)))
+    (2 '((0 0 -1) (0 0 1)))
+    ((3 5) (let ((angle (* pi (if (eql (first size) 3) 7/8 5/8))))
+             (list '(0 0 -1) (list 0 (- (sin angle)) (- (cos angle))))))))
+
+(defun arm-turn (u)
+  "Rows. The turn about :right that takes :top to the unit vector u, which lies across :right."
+  (list '(1 0 0) (list 0 (third u) (second u)) (list 0 (- (second u)) (third u))))
 
 ;;
 ;; The robot parts are this program's own, sized to the stud grid:
@@ -264,8 +296,9 @@ and 20 tooth double bevels) a stud.  Every gear's hub is a stud wide."
       ;; hole in each arm along :top, one arm down (#1) or one each way (#2)
       (:angle-connector
        (cons (make-connector :kind :pin-hole :point '(0 0 0) :dir '(1 0 0) :half 10)
-             (mapcar #'(lambda (z) (make-connector :kind :axle-hole :point (list 0 0 z) :dir '(0 0 1) :half 10))
-                     (if (eql (first size) 2) '(-20 20) '(-20)))))
+             (mapcar #'(lambda (u) (make-connector :kind :axle-hole :point (mapcar #'(lambda (x) (* 20 x)) u)
+                                                   :dir (if (axis-key u) '(0 0 1) u) :half 10))
+                     (angle-arms size))))
       ;; joiners and the stop and hole pins lie along :rear like pins
       (:axle-joiner
        (hole-row :axle-hole 0 (if (eql (first size) 2) '(-10 10) '(-20 20)) 0 '(0 1 0) 10))
@@ -289,6 +322,56 @@ and 20 tooth double bevels) a stud.  Every gear's hub is a stud wide."
       (:axle-block
        (append (hole-row :axle-hole 0 '(-20 20) 0 '(1 0 0) 10)
                (list (make-connector :kind :pin-hole :point '(0 0 0) :dir '(0 0 1) :half 10))))
+      ;; The parts below stand in their library files' own frames
+      ;; (*frame-same*): their holes and ends where those files put them.
+      ;; The bent beam: an axle hole at the anchor, four pin holes on up its
+      ;; straight arm along :top, the bend hole, and two pin holes and an
+      ;; axle hole out along the bent arm at 3-4-5 slope; all through along :rear
+      (:bent-beam
+       (append (holes-at :axle-hole '(0 1 0) '((0 0 0) (48 0 136)))
+               (holes-at :pin-hole '(0 1 0) '((0 0 20) (0 0 40) (0 0 60) (0 0 80) (0 0 100) (16 0 112) (32 0 124)))))
+      (:cheese-slope
+       (list (make-connector :kind :socket :point '(0 0 0) :dir '(0 0 -1))))
+      ;; cross blocks: 92907 a pin hole along :top with two axle holes
+      ;; across it, 63869 an axle hole beside a row of three pin holes,
+      ;; 41678 an axle hole above two pin holes.  The split ones' axle holes
+      ;; run through two prongs a stud apart, with room for a beam between
+      (:split-cross-block
+       (append (holes-at :pin-hole '(0 0 1) '((0 0 0)))
+               (holes-at :axle-hole '(1 0 0) '((-15 20 0) (15 20 0) (-15 20 -20) (15 20 -20)) 5)))
+      (:triple-cross-block
+       (append (holes-at :axle-hole '(1 0 0) '((0 0 0)))
+               (holes-at :pin-hole '(0 0 1) '((-20 20 0) (0 20 0) (20 20 0)))))
+      (:twin-cross-block
+       (append (holes-at :axle-hole '(1 0 0) '((-15 0 0) (15 0 0)) 5)
+               (holes-at :pin-hole '(0 1 0) '((-10 0 -20) (10 0 -20)))))
+      (:axle-hub
+       (append (holes-at :pin-hole '(1 0 0) '((0 0 0)))
+               (holes-at :axle '(0 1 0) '((0 -20 0)))
+               (holes-at :axle '(0 0 1) '((0 0 -20)))))
+      ;; axles with a pin hole across their middle (3L) or one end (2L)
+      (:hole-axle
+       (append (holes-at :pin-hole '(0 1 0) '((0 0 0)))
+               (holes-at :axle '(1 0 0) (if (eql (first size) 2) '((20 0 0)) '((-20 0 0) (20 0 0))))))
+      (:stud-axle
+       (list (make-connector :kind :axle :point '(0 0 0) :dir '(1 0 0) :half 30)
+             (make-connector :kind :stud :point '(30 0 0) :dir '(1 0 0))))
+      (:stop-axle
+       (list (make-connector :kind :axle :point '(0 0 0) :dir '(0 1 0) :half (* 10 (first size)))))
+      (:axle-connector
+       (append (holes-at :axle-hole '(1 0 0) '((0 0 -20))) (holes-at :axle-hole '(0 0 1) '((0 0 0)))))
+      (:axle-beam
+       (append (holes-at :axle-hole '(0 1 0) '((0 0 0))) (holes-at :pin-hole '(0 1 0) '((0 0 20)))))
+      ;; the H: two rows of three pin holes along :rear, at either end of a
+      ;; bar of three along :right
+      (:h-beam
+       (append (holes-at :pin-hole '(0 1 0) '((-20 0 -40) (0 0 -40) (20 0 -40) (-20 0 40) (0 0 40) (20 0 40)))
+               (holes-at :pin-hole '(1 0 0) '((0 0 -20) (0 0 0) (0 0 20)))))
+      (:cross-pin
+       (append (holes-at :pin '(1 0 0) '((20 0 0))) (holes-at :pin-hole '(0 1 0) '((0 0 0)))))
+      (:pin-axle
+       (list (make-connector :kind :pin :point '(-20 0 0) :dir '(1 0 0) :half 10)
+             (make-connector :kind :axle :point '(10 0 0) :dir '(1 0 0) :half 20)))
       (:round-plate
        (list (make-connector :kind :stud :point '(0 0 8) :dir '(0 0 1))
              (make-connector :kind :socket :point '(0 0 0) :dir '(0 0 -1))))
@@ -335,7 +418,25 @@ and 20 tooth double bevels) a stud.  Every gear's hub is a stud wide."
       (:cross-block (if (eql (first size) 3) (list '(-10 -30 -10) '(10 30 10)) (list '(-10 -10 -10) '(10 30 10))))
       (:l-beam (if (equal size '(2 4)) (list '(-9 -10 -9) '(29 10 69)) (list '(-9 -10 -9) '(49 10 89))))
       (:t-beam (list '(-29 -10 -9) '(29 10 49)))
-      (:angle-connector (if (eql (first size) 2) (list '(-10 -10 -30) '(10 10 30)) (list '(-10 -10 -30) '(10 10 10))))
+      (:angle-connector (case (first size)
+                          (2 (list '(-10 -10 -30) '(10 10 30)))
+                          (3 (list '(-10 -18 -30) '(10 10 31)))
+                          (5 (list '(-10 -31 -30) '(10 10 18)))
+                          (t (list '(-10 -10 -30) '(10 10 10)))))
+      (:bent-beam (list '(-9 -10 -9) '(57 10 145)))
+      (:cheese-slope (list '(-10 -10 0) '(10 10 16)))
+      (:split-cross-block (list '(-20 -9 -30) '(20 30 10)))
+      (:triple-cross-block (list '(-29 -9 -10) '(29 29 10)))
+      (:twin-cross-block (list '(-20 -10 -30) '(20 10 9)))
+      (:axle-hub (list '(-10 -30 -30) '(10 9 9)))
+      (:hole-axle (if (eql (first size) 2) (list '(-9 -10 -9) '(30 10 9)) (list '(-30 -10 -9) '(30 10 9))))
+      (:stud-axle (list '(-30 -6 -6) '(30 6 6)))
+      (:stop-axle (let ((y (* 10 (first size)))) (list (list -6 (- y) -6) (list 6 y 6))))
+      (:axle-connector (list '(-10 -9 -30) '(10 9 10)))
+      (:axle-beam (list '(-9 -10 -9) '(9 10 29)))
+      (:h-beam (list '(-29 -10 -49) '(29 10 49)))
+      (:cross-pin (list '(-9 -10 -9) '(30 10 9)))
+      (:pin-axle (list '(-30 -6 -6) '(30 6 6)))
       (:axle-joiner (if (eql (first size) 2) (list '(-8 -20 -8) '(8 20 8)) (list '(-8 -30 -8) '(8 30 8))))
       (:pin-joiner (list '(-10 -20 -10) '(10 20 10)))
       (:stop-pin (list '(-9 -30 -9) '(9 30 9)))
@@ -372,7 +473,9 @@ and 20 tooth double bevels) a stud.  Every gear's hub is a stud wide."
 
 (defun local-boxes (spec)
   "List of boxes, each two corners, that the part fills: its extent, or for
-an L-beam one box per arm, so a part in the crook of the L is clear."
+an L-beam one box per arm, so a part in the crook of the L is clear.  A
+box may carry a third element, rows of a turn: its corners are then in
+that turned frame, for an arm set off the part's own axes."
   (case (spec-type spec)
     (:l-beam (if (equal (spec-size spec) '(2 4))
                  (list (list '(-9 -10 -9) '(9 10 69)) (list '(-9 -10 51) '(29 10 69)))
@@ -390,8 +493,24 @@ an L-beam one box per arm, so a part in the crook of the L is clear."
     ;; turned about either axis -- a steering pivot -- does not swing its
     ;; corners into its neighbors
     (:angle-connector (cons (list '(-10 -7 -7) '(10 7 7))
-                            (mapcar #'(lambda (z) (if (minusp z) (list '(-7 -7 -30) (list 7 7 -7)) (list '(-7 -7 7) '(7 7 30))))
-                                    (if (eql (first (spec-size spec)) 2) '(-1 1) '(-1)))))
+                            (mapcar #'(lambda (u) (cond ((equal u '(0 0 -1)) (list '(-7 -7 -30) (list 7 7 -7)))
+                                                        ((equal u '(0 0 1)) (list '(-7 -7 7) '(7 7 30)))
+                                                        (t (list '(-7 -7 7) '(7 7 30) (arm-turn u)))))
+                                    (angle-arms (spec-size spec)))))
+    ;; the bent beam's bent arm, in a frame turned to its 3-4-5 slope
+    (:bent-beam (list (list '(-9 -10 -9) '(9 10 109))
+                      (list '(-89 -10 51) '(-71 10 129) '((3/5 0 4/5) (0 1 0) (-4/5 0 3/5)))))
+    (:split-cross-block (list (list '(-10 -9 -10) '(10 10 10)) (list '(-20 10 -30) '(-10 30 10)) (list '(10 10 -30) '(20 30 10))))
+    (:triple-cross-block (list (list '(-10 -9 -10) '(10 10 10)) (list '(-29 11 -10) '(29 29 10))))
+    (:twin-cross-block (list (list '(-20 -9 -9) '(-10 9 9)) (list '(10 -9 -9) '(20 9 9)) (list '(-20 -10 -30) '(20 10 -10))))
+    (:axle-hub (list (list '(-10 -9 -9) '(10 9 9)) (list '(-6 -30 -6) '(6 -9 6)) (list '(-6 -6 -30) '(6 6 -9))))
+    (:hole-axle (cons (list '(-9 -10 -9) '(9 10 9))
+                      (if (eql (first (spec-size spec)) 2)
+                          (list (list '(9 -6 -6) '(30 6 6)))
+                          (list (list '(-30 -6 -6) '(-9 6 6)) (list '(9 -6 -6) '(30 6 6))))))
+    (:axle-connector (list (list '(-10 -9 -30) '(10 9 -11)) (list '(-9 -9 -11) '(9 9 10))))
+    (:h-beam (list (list '(-29 -10 -49) '(29 10 -31)) (list '(-29 -10 31) '(29 10 49)) (list '(-10 -9 -31) '(10 9 31))))
+    (:cross-pin (list (list '(-9 -10 -9) '(9 10 9)) (list '(9 -6 -6) '(30 6 6))))
     (:tyre (ring-boxes 38 62 25))
     (t (list (local-extent spec)))))
 
@@ -403,7 +522,8 @@ an L-beam one box per arm, so a part in the crook of the L is clear."
 ;;
 
 (defun oriented-box (rows at box)
-  (destructuring-bind (lo hi) box
+  (destructuring-bind (lo hi &optional turn) box
+    (when turn (setf rows (matrix* rows turn)))
     (list (v+ at (rotate rows (mapcar #'(lambda (a b) (/ (+ a b) 2)) lo hi)))
           (mapcar #'(lambda (j) (let ((v (column rows j))) (if (= (dot v v) 1) v (unit v)))) '(0 1 2))
           (mapcar #'(lambda (a b) (/ (- b a) 2)) lo hi))))
@@ -632,7 +752,7 @@ An axle in a round pin hole turns freely and carries nothing."
       (some #'(lambda (k) (and (eql (connector-kind (third k)) kind-i) (eql (connector-kind (second k)) kind-j)))
             (gethash (cons j i) table))))
 
-(defparameter *shafts* '(:axle :axle-pin)
+(defparameter *shafts* '(:axle :axle-pin :stop-axle :pin-axle :stud-axle :hole-axle)
   "Part types that carry turning along their axle: an axle-pin's axle end
 turns what sits on it as an axle does; its pin end turns freely.")
 
@@ -649,8 +769,8 @@ turns what sits on it as an axle does; its pin end turns freely.")
                (let (result)
                  (dolist (j (aref near i) result)
                    (progn
-                     (case (aref types i)
-                       ((:axle :axle-pin)
+                     (case (if (member (aref types i) *shafts*) :shaft (aref types i))
+                       (:shaft
                         (when (and (member (aref types j) '(:gear :wheel :rim)) (held-p j :axle-hole i :axle))
                           (push (list j speed) result)))
                        ((:gear :wheel :rim)

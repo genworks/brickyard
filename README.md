@@ -96,12 +96,20 @@ goes to the server, which answers with the parts that changed.
 | `:cross-block` | `([2 or 3])`: an axle hole across it, pin holes through it | where the library has it |
 | `:l-beam` | `(3 5)` or `(2 4)` (its end hole an axle hole) | the end hole of the long arm |
 | `:t-beam` | none: 3 by 3 | the end hole of the stem |
-| `:angle-connector` | `([1 or 2])`: one arm, or two in line | the hub |
+| `:angle-connector` | `([1, 2, 3 or 5])`: one arm, two in line, or two at 157.5 (#3) or 112.5 degrees (#5) | the hub |
 | `:axle-joiner` | `([2 or 3])` studs long | its middle |
 | `:pin-joiner`, `:stop-pin`, `:hole-pin` | none | as the library has them |
 | `:pin-block`, `:axle-block` | none: the 1 by 3 cross blocks with four pins, and axle/pin/axle | the middle hole |
 | `:round-tile`, `:round-plate` | none: 1 by 1 | center of the bottom face |
 | `:rim`, `:tyre` | none: rim 20 by 30, tyre 48 by 20; the tyre seats on the rim | the center |
+| `:bent-beam` | none: the 4 by 6 liftarm bent 53.13 degrees (6629) | its end axle hole |
+| `:h-beam`, `:axle-beam` | none: the 5 by 3 H (14720); a beam 2 with an axle hole (60483) | as the library has them |
+| `:split-cross-block`, `:twin-cross-block`, `:triple-cross-block` | none: 92907, 41678 and 63869 | as the library has them |
+| `:axle-hub`, `:axle-connector`, `:cross-pin` | none: two axles at 90 degrees on a pin hole (10197); axle/bush connector (32039); a pin with a pin hole (15100) | as the library has them |
+| `:stop-axle` | `([4 or 8])`: studs long | its middle |
+| `:hole-axle` | `([2 or 3])`: an axle with a pin hole across its end or middle | the pin hole |
+| `:stud-axle`, `:pin-axle` | none: an axle 3 with a stud (6587); an axle 2 with a pin (18651) | as the library has them |
+| `:cheese-slope` | none: the 1 by 1 slope two plates high (54200) | center of the bottom face |
 
 The Technic connectors, beams, gears 12 and 20 (double bevel), the
 round plate and the rim and tyre follow the LDraw library's own parts:
@@ -152,8 +160,9 @@ like any other.
 
 - `source/specs.lisp` is plain Lisp over the specs: connectors (studs,
   sockets, pin holes, pins, axles), extents, mates, collisions, the
-  groups of parts held together, and snapping.  All of it is exact
-  integer arithmetic.
+  groups of parts held together, and snapping.  On the square grid all
+  of it is exact arithmetic; only angled parts and the bent arms of
+  angle connectors #3 and #5 carry floating point.
 - `source/parts.lisp` draws each part with Gendl primitives, its studs
   and holes taken from the same connectors the rules use.
 - `source/assembly.lisp` is the build: its parts, what holds them, and
