@@ -511,13 +511,58 @@ an empty group the parts go into."
     (respond req ent "application/json"
              (with-output-to-string (s) (yason:encode result s)))))
 
+;;
+;; A private beta's door: when Gendl's invite-gate is loaded, every page
+;; and call under /brickyard answers only a request carrying a live
+;; invite, minted on the server and handed out as a link.  Without an
+;; invites file the gate is open, and without invite-gate there is no
+;; gate at all, so development rooms and cold loads run as before.  The
+;; static files (the page's own script and style) stay open.
+;;
+;;   (brickyard:private-beta "/path/to/brickyard-invites.sexp" "https://example.com")
+;;   (invite-gate:mint-invite! (brickyard:gate) "Name")  ; => token, link
+;;
+
+(defvar *gate* nil "The invite gate, made on first use when invite-gate is loaded.")
+
+(defun gate ()
+  (or *gate*
+      (when (find-package :invite-gate)
+        (setf *gate* (uiop:symbol-call :invite-gate :make-gate
+                                       :name "Brickyard" :prefix "/brickyard" :cookie "brickyard_invite")))))
+
+(defun gated (handler)
+  "A publish function that answers through handler only what the gate admits."
+  #'(lambda (req ent)
+      (let ((gate (gate)))
+        (cond ((null gate) (funcall handler req ent))
+              ((uiop:symbol-call :invite-gate :invite-allowed? gate req)
+               (uiop:symbol-call :invite-gate :ensure-invite-cookie! gate req)
+               (funcall handler req ent))
+              (t (uiop:symbol-call :invite-gate :refuse gate req ent))))))
+
+(defun publish-invite-door (server)
+  (when (gate)
+    (uiop:symbol-call :invite-gate :publish-invite-door (gate) :server server)))
+
+(defun private-beta (invites-file public-base)
+  "Close the gate to all but the invites in invites-file, whose links start with public-base."
+  (unless (find-package :invite-gate) (error "Load Gendl's invite-gate first."))
+  (setf *gate* (uiop:symbol-call :invite-gate :make-gate
+                                 :name "Brickyard" :prefix "/brickyard" :cookie "brickyard_invite"
+                                 :invites-file invites-file :public-base public-base))
+  (when (boundp 'net.aserve:*wserver*) (publish-invite-door net.aserve:*wserver*))
+  *gate*)
+
 (defun publish-brickyard (server)
-  (net.aserve:publish :path "/brickyard" :server server :function #'page-handler)
-  (net.aserve:publish :path "/brickyard/api" :server server :function #'api-handler)
-  (net.aserve:publish :path "/brickyard/export" :server server :function #'export-handler)
-  (net.aserve:publish :path "/brickyard/import" :server server :function #'import-handler)
+  (dolist (path '("/brickyard" "/brickyard/"))
+    (net.aserve:publish :path path :server server :function (gated #'page-handler)))
+  (net.aserve:publish :path "/brickyard/api" :server server :function (gated #'api-handler))
+  (net.aserve:publish :path "/brickyard/export" :server server :function (gated #'export-handler))
+  (net.aserve:publish :path "/brickyard/import" :server server :function (gated #'import-handler))
   (net.aserve:publish-directory :prefix "/brickyard/static/" :server server
-                                :destination (namestring *static-directory*)))
+                                :destination (namestring *static-directory*))
+  (publish-invite-door server))
 
 ;; Published with the rest when the server starts; and now, when it is
 ;; already running (a load into a live room).

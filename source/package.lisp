@@ -9,4 +9,4 @@
 (gwl:define-package :brickyard
   (:export #:assembly #:*sample-build*
            #:world-connectors #:world-extent #:connections #:collisions
-           #:snap-spec #:to-ldraw))
+           #:snap-spec #:to-ldraw #:gate #:private-beta))

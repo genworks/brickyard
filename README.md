@@ -67,6 +67,19 @@ a note.  A file is limited to 4 MB and 2000 parts; numbers are read by
 hand, never by the Lisp reader.  `from-ldraw` does the same from Lisp
 and returns the specs and that report.
 
+For a private beta, load Gendl's `invite-gate` before Brickyard and
+close the gate to a roster kept on the server:
+
+```lisp
+(brickyard:private-beta "/path/to/brickyard-invites.sexp" "https://example.com")
+(invite-gate:mint-invite! (brickyard:gate) "A tester")  ; => token, link to hand out
+```
+
+The link sets a cookie and opens the editor; every page and call under
+`/brickyard` then answers only a live invite (the static script and
+style stay open).  Without a roster the gate is open, and without
+`invite-gate` there is none.
+
 The page is X_ITE, an X3D browser: each part is its own Transform with
 a PlaneSensor, so dragging runs in the browser and only the release
 goes to the server, which answers with the parts that changed.
