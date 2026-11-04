@@ -822,6 +822,64 @@ member's anchor."
             group)))
 
 ;;
+;; Swinging by hand: a part, and what it carries, turned by any angle
+;; about a line -- the pin or axle it hangs on, or the vertical.
+;;
+
+(defun axis-rotation (axis radians)
+  "Rows. The rotation by radians about the unit vector axis (Rodrigues)."
+  (destructuring-bind (x y z) (mapcar #'(lambda (v) (coerce v 'double-float)) (unit axis))
+    (let* ((c (cos radians)) (s (sin radians)) (k (- 1 c)))
+      (list (list (+ (* k x x) c) (- (* k x y) (* s z)) (+ (* k x z) (* s y)))
+            (list (+ (* k x y) (* s z)) (+ (* k y y) c) (- (* k y z) (* s x)))
+            (list (- (* k x z) (* s y)) (+ (* k y z) (* s x)) (+ (* k z z) c))))))
+
+(defun settle-spec (spec rows at)
+  "The spec standing at at, turned by rows: back in square form, :up and
+:rear and whole LDU, when rows are within a degree of a square turn and at
+within a twentieth of whole; else at that angle, as :matrix."
+  (let ((new (copy-list spec))
+        (square (square-matrix rows 1/50)))
+    (remf new :matrix) (remf new :up) (remf new :rear)
+    (if square
+        (let ((whole (mapcar #'round at)))
+          (setf (getf new :up) (axis-key (column square 2))
+                (getf new :rear) (axis-key (column square 1))
+                (getf new :at) (if (every #'(lambda (a w) (< (abs (- a w)) 1/20)) at whole) whole at)))
+        (setf (getf new :matrix) rows
+              (getf new :at) at))
+    new))
+
+(defun swing-spec (spec point axis radians)
+  "The spec turned by radians about the line through point along axis."
+  (let ((turn (axis-rotation axis radians)))
+    (settle-spec spec
+                 (matrix* turn (spec-rotation spec))
+                 (v+ point (rotate turn (v- (spec-at spec) point))))))
+
+(defun pivot-line (specs moving survey)
+  "What the moving parts (indices) can swing about: (point axis) when every
+pin or axle joint holding them to the rest lies on one line; :locked when
+such joints lie on two lines or more; nil when none holds them."
+  (declare (ignore specs))
+  (let (lines)
+    (dolist (pair (survey-pairs survey))
+      (destructuring-bind (i j joints) pair
+        (when (and (or (member i moving) (member j moving))
+                   (not (and (member i moving) (member j moving))))
+          (dolist (k joints)
+            (when (eql (first k) :axial)
+              (let ((point (connector-point (second k))) (axis (connector-dir (second k))))
+                (unless (some #'(lambda (line)
+                                  (and (parallel-p axis (second line))
+                                       (< (norm (cross (v- point (first line)) (second line))) *tolerance*)))
+                              lines)
+                  (push (list point axis) lines))))))))
+    (cond ((null lines) nil)
+          ((rest lines) :locked)
+          (t (first lines)))))
+
+;;
 ;; What a part carries: what rests on it alone, and what hangs from it.
 ;;
 

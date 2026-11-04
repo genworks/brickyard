@@ -65,7 +65,7 @@
   }
 
   async function apply(reply) {
-    say(reply.ok ? '' : reply.message);
+    say(reply.message || '');
     (reply.removed || []).forEach(removePart);
     const changed = reply.parts || [];
     if (changed.length > 1) await putParts(changed);
@@ -238,6 +238,12 @@
     } else if (key === 'r' || key === 'R') api('turn', { id: id, carry: carry });
     else if (key === 't' || key === 'T') api('tilt', { id: id, carry: carry });
     else if (key === 'e' || key === 'E') api('roll', { id: id, carry: carry });
+    // swing about the pin or axle it hangs on: [ ] by 15 degrees, Alt by 5;
+    // Shift gives { } on most keyboards, so those count too
+    else if (key === '[' || key === '{' || e.code === 'BracketLeft')
+      api('rotate', { id: id, degrees: e.altKey ? -5 : -15, carry: carry });
+    else if (key === ']' || key === '}' || e.code === 'BracketRight')
+      api('rotate', { id: id, degrees: e.altKey ? 5 : 15, carry: carry });
     else if (key === 'c' || key === 'C') api('copy', { id: id }).then(function () {
       select(Math.max.apply(null, Array.from(parts.keys())));
     });

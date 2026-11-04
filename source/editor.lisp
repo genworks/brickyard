@@ -274,6 +274,30 @@ nil when there is none."
 
         ((null spec) (refuse "No such part."))
 
+        ;; swing by hand: degrees about the pin or axle the part (and what
+        ;; it carries, unless carry=0) hangs on, or about the vertical
+        ((string= op "rotate")
+         (let* ((index (position spec specs))
+                (survey (survey specs))
+                (moving (if (string= (or (funcall param "carry") "1") "0") (list index) (carried specs index survey)))
+                (line (pivot-line specs moving survey))
+                (degrees (let ((d (read-number (funcall param "degrees")))) (max -180 (min 180 d))))
+                (radians (* degrees (/ pi 180)))
+                (group (mapcar #'(lambda (i) (nth i specs)) moving))
+                (others (remove-if #'(lambda (s) (member s group :test #'eq)) specs)))
+           (if (eq line :locked)
+               (refuse "It is held on two pins or axles; it cannot swing.")
+               (let* ((point (if line (first line) (spec-at spec)))
+                      (axis (if line (second line) '(0 0 1)))
+                      (swung (mapcar #'(lambda (s) (swing-spec s point axis radians)) group)))
+                 (if (group-clear-p swung others)
+                     (progn
+                       (funcall store (mapcar #'(lambda (s) (let ((k (position s group :test #'eq))) (if k (nth k swung) s))) specs))
+                       (reply assembly :changed (mapcar #'spec-id swung)
+                                       :message (format nil "Swung ~d degrees about ~a." degrees
+                                                        (if line "the pin or axle it hangs on" "the vertical"))))
+                     (refuse "No room to swing it there."))))))
+
         ((string= op "carried")
          (json-object :ok t :carried (coerce (mapcar #'(lambda (i) (spec-id (nth i specs)))
                                                      (carried specs (position spec specs)))
@@ -381,6 +405,7 @@ nil when there is none."
          (:dt "drag") (:dd "slide a part and what it carries; it snaps on release")
          (:dt "arrows") (:dd "nudge a stud; PgUp / PgDn a plate")
          (:dt "R T E") (:dd "turn, tilt, roll a quarter")
+         (:dt "[ ]") (:dd "swing 15 degrees about the pin or axle it hangs on (Alt: 5)")
          (:dt "Shift") (:dd "with any of these: the part alone")
          (:dt "C") (:dd "copy on top")
          (:dt "Del") (:dd "remove")
