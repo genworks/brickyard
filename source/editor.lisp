@@ -305,7 +305,8 @@ nil when there is none."
        (:a :href "/brickyard?new=1" "New build")
        (:a :href "/brickyard?new=robot" "Robot build")
        (:a :href "/brickyard?new=gearbox" "Gearbox")
-       (:a :href "/brickyard?new=empty" "Empty build"))
+       (:a :href "/brickyard?new=empty" "Empty build")
+       (:a :href (format nil "/brickyard/export?b=~a" build-id) :id "export" "Export LDraw"))
       (:main
        (:aside :id "bin"
         (dolist (group *palette*)
@@ -381,6 +382,18 @@ an empty group the parts go into."
            (respond req ent "text/html; charset=utf-8" (page-html id)))
           (t (redirect req ent "/brickyard?new=1")))))
 
+(defun export-handler (req ent)
+  (let* ((id (net.aserve:request-query-value "b" req))
+         (text (bt:with-lock-held (*builds-lock*)
+                 (let ((assembly (find-build id)))
+                   (when assembly (to-ldraw assembly :name (format nil "brickyard-~a" id)))))))
+    (if text
+        (net.aserve:with-http-response (req ent :content-type "application/x-ldraw")
+          (net.aserve:with-http-body (req ent :headers (list (cons :content-disposition
+                                                                   (format nil "attachment; filename=\"brickyard-~a.mpd\"" id))))
+            (write-string text (net.aserve:request-reply-stream req))))
+        (respond req ent "text/plain" "No such build." :code net.aserve:*response-not-found*))))
+
 (defun api-handler (req ent)
   (let* ((params (net.aserve:form-urlencoded-to-query (gwl:request-body-text req)))
          (id (cdr (assoc "b" params :test #'string=)))
@@ -398,6 +411,7 @@ an empty group the parts go into."
 (defun publish-brickyard (server)
   (net.aserve:publish :path "/brickyard" :server server :function #'page-handler)
   (net.aserve:publish :path "/brickyard/api" :server server :function #'api-handler)
+  (net.aserve:publish :path "/brickyard/export" :server server :function #'export-handler)
   (net.aserve:publish-directory :prefix "/brickyard/static/" :server server
                                 :destination (namestring *static-directory*)))
 

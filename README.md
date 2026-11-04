@@ -47,6 +47,16 @@ across restarts.
 - The report counts joined pairs and names overlapping and loose
   parts, and keeps the parts list.
 
+"Export LDraw" downloads the build as an LDraw multi-part document
+(`.mpd`) for LDraw programs such as LeoCAD.  Parts the official LDraw
+library has are placed by their library numbers (3001, 3702, 32316,
+3705, 3647 ...), each in the frame its library file uses, checked
+against the files' own studs, holes, axle ends and outlines; a brick
+several bricks high goes out as a stack of standard bricks.  Wheels,
+the motor, the controller and sizes the library lacks go in the same
+file as subfiles drawn from the Gendl model.  `to-ldraw` gives the
+same text from Lisp.
+
 The page is X_ITE, an X3D browser: each part is its own Transform with
 a PlaneSensor, so dragging runs in the browser and only the release
 goes to the server, which answers with the parts that changed.

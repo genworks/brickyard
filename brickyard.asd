@@ -10,4 +10,4 @@
  "gendl-asdf:around-compile" :components
  ((:file "source/package") (:file "source/specs")
   (:file "source/parts") (:file "source/assembly")
-  (:file "source/editor")))
+  (:file "source/ldraw") (:file "source/editor")))

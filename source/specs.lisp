@@ -122,6 +122,12 @@ brick family, (n) for beams and axles, () for a pin."
 teeth add up to 32 mesh two studs apart (8 and 24, 16 and 16)."
   (* 5/4 teeth))
 
+(defun gear-half (teeth)
+  "LDU. Half a gear's tooth width, as the LDraw library draws them: 8 and
+16 teeth are a stud wide, larger gears half a stud.  Every gear's hub is
+a stud wide."
+  (if (<= teeth 16) 10 5))
+
 (defun row-offset (j n)
   "LDU from the middle of a row of n places, 20 apart, to place j."
   (- (* 20 j) (* 10 (1- n))))
@@ -162,7 +168,7 @@ teeth add up to 32 mesh two studs apart (8 and 24, 16 and 16)."
                              14 '(1 0 0) 10)))))
       (:beam
        (let ((n (first size)))
-         (hole-row :pin-hole 0 (mapcar #'(lambda (j) (row-offset j n)) (iota n)) 0 '(1 0 0) 9)))
+         (hole-row :pin-hole 0 (mapcar #'(lambda (j) (row-offset j n)) (iota n)) 0 '(1 0 0) 10)))
       (:axle
        (list (make-connector :kind :axle :point '(0 0 0) :dir '(0 1 0) :half (* 10 (first size)))))
       (:pin
@@ -171,9 +177,10 @@ teeth add up to 32 mesh two studs apart (8 and 24, 16 and 16)."
       (:wheel
        (list (make-connector :kind :axle-hole :point '(0 0 0) :dir '(0 1 0) :half (* 10 (second size)))))
       (:gear
-       (list (make-connector :kind :axle-hole :point '(0 0 0) :dir '(0 1 0) :half 5)
-             (make-connector :kind :gear :point '(0 0 0) :dir '(0 1 0) :half 5
-                             :radius (pitch-radius (first size)))))
+       (let ((half (gear-half (first size))))
+         (list (make-connector :kind :axle-hole :point '(0 0 0) :dir '(0 1 0) :half 10)
+               (make-connector :kind :gear :point '(0 0 0) :dir '(0 1 0) :half half
+                               :radius (pitch-radius (first size))))))
       (:motor
        (append (grid-connectors :stud 2 4 48 '(0 0 1))
                (grid-connectors :socket 2 4 0 '(0 0 -1))
@@ -192,13 +199,13 @@ teeth add up to 32 mesh two studs apart (8 and 24, 16 and 16)."
       ((:brick :plate :tile :technic-brick)
        (destructuring-bind (w l h) size
          (list (list (* -10 w) (* -10 l) 0) (list (* 10 w) (* 10 l) (* 8 h)))))
-      (:beam (let ((y (+ (* 10 (1- (first size))) 9))) (list (list -9 (- y) -9) (list 9 y 9))))
+      (:beam (let ((y (+ (* 10 (1- (first size))) 9))) (list (list -10 (- y) -9) (list 10 y 9))))
       (:axle (let ((y (* 10 (first size)))) (list (list -6 (- y) -6) (list 6 y 6))))
       (:pin (list '(-6 -20 -6) '(6 20 6)))
       (:wheel (destructuring-bind (d w) size
                 (list (list (* -10 d) (* -10 w) (* -10 d)) (list (* 10 d) (* 10 w) (* 10 d)))))
       (:gear (let ((r (+ (pitch-radius (first size)) 5/2)))
-               (list (list (- r) -5 (- r)) (list r 5 r))))
+               (list (list (- r) -10 (- r)) (list r 10 r))))
       (:motor (list '(-20 -40 0) '(20 60 48)))
       (:controller (list '(-40 -60 0) '(40 60 48))))))
 

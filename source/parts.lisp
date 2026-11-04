@@ -77,12 +77,12 @@
   :objects
   ((body :type 'box
          :sequence (:size (if (> (the n) 1) 1 0))
-         :width 7.2 :length (* 8 (1- (the n))) :height 7.2
+         :width 7.9 :length (* 8 (1- (the n))) :height 7.2
          :display-controls (the display-controls))
 
    (end-caps :type 'cylinder
          :sequence (:size (if (> (the n) 1) 2 1))
-         :radius 3.6 :length 7.2
+         :radius 3.6 :length 7.9
          :center (the (local-point (list 0 (row-offset (* (the-child index) (1- (the n))) (the n)) 0)))
          :orientation (alignment :rear (the (face-normal-vector :right)))
          :display-controls (the display-controls))))
@@ -146,19 +146,25 @@
   :computed-slots
   ((teeth (first (the size)))
    (pitch-radius (mm (pitch-radius (the teeth))))
+   (thickness (- (mm (* 2 (gear-half (the teeth)))) 0.2))
    (axis (the (face-normal-vector :rear)))
    (spoke (the (face-normal-vector :top))))
 
   :objects
   ((disk :type 'cylinder
-         :radius (- (the pitch-radius) 0.7) :length 3.8
+         :radius (- (the pitch-radius) 0.7) :length (the thickness)
          :display-controls (the display-controls))
+
+   (hub :type 'cylinder
+        :sequence (:size (if (< (the thickness) 7.8) 1 0))
+        :radius 4.0 :length 7.8
+        :display-controls (the display-controls))
 
    (cogs :type 'box
          :sequence (:size (the teeth))
          :pseudo-inputs (radial)
          :radial (rotate-vector-d (the spoke) (* (+ (the-child index) 1/2) (/ 360 (the teeth))) (the axis))
-         :width 1.4 :length 3.8 :height 2.2
+         :width 1.4 :length (the thickness) :height 2.2
          :center (translate-along-vector (the center) (the-child radial) (- (the pitch-radius) 0.1))
          :orientation (alignment :rear (the axis) :top (the-child radial))
          :display-controls (the display-controls))))
