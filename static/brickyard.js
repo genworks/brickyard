@@ -16,6 +16,35 @@
   const messageBox = document.getElementById('message');
   const parts = new Map();               // id -> { outer, sensor, inner, label }
   let browser, group, selected = null, color = 'red', busy = Promise.resolve();
+  let carried = [];                      // ids that move with the selected part, itself excluded
+  let shift = false;                     // Shift held: the selected part moves alone
+
+  document.addEventListener('keydown', function (e) { if (e.key === 'Shift') { shift = true; preview(lastDrag); } });
+  document.addEventListener('keyup', function (e) { if (e.key === 'Shift') { shift = false; preview(lastDrag); } });
+  let lastDrag = null;                   // { id, x, y } while a drag is under way
+
+  // Ask which parts come along with id; the answer only lights and
+  // previews, the server decides again on release.
+  function askCarried(id) {
+    carried = [];
+    fetch('/brickyard/api', { method: 'POST', body: new URLSearchParams({ b: buildId, op: 'carried', id: id }) })
+      .then(function (r) { return r.json(); })
+      .then(function (reply) {
+        if (selected !== id || !reply.ok) return;
+        carried = reply.carried.filter(function (c) { return c !== id; });
+        highlight();
+        preview(lastDrag);
+      })
+      .catch(function () {});
+  }
+
+  // Slide the dragged part, and what it carries unless Shift is held.
+  function preview(drag) {
+    parts.forEach(function (part, id) {
+      const moving = drag && (id === drag.id || (!shift && carried.indexOf(id) >= 0));
+      part.inner.translation = moving ? new X3D.SFVec3f(drag.x, drag.y, 0) : new X3D.SFVec3f(0, 0, 0);
+    });
+  }
 
   // One request at a time, in order: a drag's release and the key after
   // it must reach the server in the order they were made.
@@ -42,6 +71,7 @@
     if (reply.status) report(reply.status);
     if (selected !== null && !parts.has(selected)) selected = null;
     highlight();
+    if (selected !== null && ((reply.parts || []).length || (reply.removed || []).length)) askCarried(selected);
   }
 
   function removePart(id) {
@@ -63,19 +93,22 @@
     sensor.addFieldCallback('brickyard', 'isActive', function (active) {
       if (active) {
         part.dragged = null;
-        select(p.id);
+        if (selected !== p.id) select(p.id);
       } else if (part.dragged) {
         const t = part.dragged;
         part.dragged = null;
+        lastDrag = null;
         if (Math.hypot(t.x, t.y) > 0.5)
-          api('move', { id: p.id, dx: (t.x / LDU).toFixed(2), dy: (t.y / LDU).toFixed(2), dz: 0 });
+          api('move', { id: p.id, dx: (t.x / LDU).toFixed(2), dy: (t.y / LDU).toFixed(2), dz: 0,
+                        carry: shift ? 0 : 1 });
         else
-          inner.translation = new X3D.SFVec3f(0, 0, 0);
+          preview(null);
       }
     });
     sensor.addFieldCallback('brickyard', 'translation_changed', function (t) {
       part.dragged = { x: t.x, y: t.y };
-      inner.translation = new X3D.SFVec3f(t.x, t.y, 0);
+      lastDrag = { id: p.id, x: t.x, y: t.y };
+      preview(lastDrag);
     });
   }
 
@@ -95,7 +128,8 @@
 
   function highlight() {
     parts.forEach(function (part, id) {
-      const glow = id === selected ? new X3D.SFColor(0.25, 0.25, 0.1) : new X3D.SFColor(0, 0, 0);
+      const glow = id === selected ? new X3D.SFColor(0.25, 0.25, 0.1)
+        : carried.indexOf(id) >= 0 ? new X3D.SFColor(0.1, 0.1, 0.04) : new X3D.SFColor(0, 0, 0);
       eachMaterial(part.inner, function (m) { m.emissiveColor = glow; });
     });
     document.querySelectorAll('#bom tr').forEach(function (tr) { tr.classList.remove('selected'); });
@@ -103,9 +137,11 @@
 
   function select(id) {
     selected = id;
+    carried = [];
     highlight();
     const part = parts.get(id);
     say(part ? part.label + ' (' + id + ')' : '');
+    if (part) askCarried(id);
   }
 
   function report(status) {
@@ -171,13 +207,13 @@
   };
   document.addEventListener('keydown', function (e) {
     if (selected === null || e.target.closest('input, textarea')) return;
-    const key = e.key, id = selected;
+    const key = e.key, id = selected, carry = e.shiftKey ? 0 : 1;
     if (nudges[key]) {
       const d = nudges[key];
-      api('move', { id: id, dx: d[0], dy: d[1], dz: d[2], exact: 1 });
-    } else if (key === 'r' || key === 'R') api('turn', { id: id });
-    else if (key === 't' || key === 'T') api('tilt', { id: id });
-    else if (key === 'e' || key === 'E') api('roll', { id: id });
+      api('move', { id: id, dx: d[0], dy: d[1], dz: d[2], exact: 1, carry: carry });
+    } else if (key === 'r' || key === 'R') api('turn', { id: id, carry: carry });
+    else if (key === 't' || key === 'T') api('tilt', { id: id, carry: carry });
+    else if (key === 'e' || key === 'E') api('roll', { id: id, carry: carry });
     else if (key === 'c' || key === 'C') api('copy', { id: id }).then(function () {
       select(Math.max.apply(null, Array.from(parts.keys())));
     });

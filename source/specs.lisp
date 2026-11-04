@@ -419,21 +419,36 @@ how far up or down."
         ((> (first a) (first b)) nil)
         (t (rank< (rest a) (rest b)))))
 
-(defun drop-spec (spec others &key (reach 40) (free? t))
-  "The spec as it lands when let go where it stands: onto the clear joint
-nearest in plan within reach LDU, any height, landing on top before going
-underneath; failing that, when free? and it is clear where it is, left
-there on a grid of half studs and plates (it will be loose); else nil."
-  (let* ((spec (move-spec spec (mapcar #'round (spec-at spec))))
+(defun shift-specs (specs move)
+  (mapcar #'(lambda (s) (move-spec s (v+ (spec-at s) move))) specs))
+
+(defun group-clear-p (group others)
+  (notany #'(lambda (s) (collides-with-any-p s others)) group))
+
+(defun drop-group (group others &key (reach 40) (free? t))
+  "List. The group of specs, moved as one rigid body, as it lands when let
+go where it stands: onto the clear joint nearest in plan within reach
+LDU that any member makes with the others, any height, landing on top
+before going underneath; failing that, when free? and it is clear where
+it is, left there with its first member on a grid of half studs and
+plates (it will be loose); else nil."
+  (let* ((group (mapcar #'(lambda (s) (move-spec s (mapcar #'round (spec-at s)))) group))
          (moves (remove-if #'(lambda (m) (> (first (move-rank m)) reach))
-                           (mapcar #'rest (snap-moves spec others)))))
+                           (mapcan #'(lambda (s) (mapcar #'rest (snap-moves s others))) group))))
     (or (dolist (move (stable-sort moves #'rank< :key #'move-rank))
-          (let ((moved (move-spec spec (v+ (spec-at spec) move))))
-            (unless (collides-with-any-p moved others) (return moved))))
+          (let ((moved (shift-specs group move)))
+            (when (group-clear-p moved others) (return moved))))
         (when free?
-          (let ((gridded (move-spec spec (destructuring-bind (x y z) (spec-at spec)
-                                           (list (* 10 (round x 10)) (* 10 (round y 10)) (* 8 (round z 8)))))))
-            (unless (collides-with-any-p gridded others) gridded))))))
+          (let* ((lead (spec-at (first group)))
+                 (gridded (shift-specs group (v- (destructuring-bind (x y z) lead
+                                                   (list (* 10 (round x 10)) (* 10 (round y 10)) (* 8 (round z 8))))
+                                                 lead))))
+            (when (group-clear-p gridded others) gridded))))))
+
+(defun drop-spec (spec others &rest keys &key reach free?)
+  "The spec as drop-group lands it alone, or nil."
+  (declare (ignore reach free?))
+  (first (apply #'drop-group (list spec) others keys)))
 
 ;;
 ;; Turning: quarter turns about the world's axes, the anchor staying put.
@@ -451,6 +466,61 @@ there on a grid of half studs and plates (it will be loose); else nil."
     (setf (getf new :up) (axis-key (quarter-turn about (axis (spec-up spec))))
           (getf new :rear) (axis-key (quarter-turn about (axis (spec-rear spec)))))
     new))
+
+(defun turn-group (group about)
+  "The group turned a quarter about the world axis about, round its first
+member's anchor."
+  (let ((pivot (spec-at (first group))))
+    (mapcar #'(lambda (s)
+                (move-spec (turn-spec s about) (v+ pivot (quarter-turn about (v- (spec-at s) pivot)))))
+            group)))
+
+;;
+;; What a part carries: what rests on it alone, and what hangs from it.
+;;
+
+(defun sits-on-p (upper lower)
+  "True when a socket of upper is on a stud of lower."
+  (let ((studs (remove :stud (world-connectors lower) :key #'connector-kind :test-not #'eql)))
+    (some #'(lambda (socket)
+              (and (eql (connector-kind socket) :socket)
+                   (some #'(lambda (stud) (mate-p socket stud)) studs)))
+          (world-connectors upper))))
+
+(defun carried (specs index)
+  "List of the indices that move with part index, index first.  A part
+comes along when everything it rests on comes along; and a set of parts
+held to the moving ones but not standing on the ground through anything
+else (a beam on pins, a wheel on an axle in the moving part) comes along
+too.  The ground is the lowest of the parts that stay.  A part resting
+on the moving part and on something else stays."
+  (let* ((n (length specs))
+         (all (iota n))
+         (links (mapcar #'(lambda (c) (list (first c) (second c))) (connections specs)))
+         (supports (mapcar #'(lambda (i)
+                               (remove-if-not #'(lambda (j) (and (/= i j) (sits-on-p (nth i specs) (nth j specs))))
+                                              all))
+                           all))
+         (moving (list index)))
+    (do ((grown t)) ((not grown) (cons index (sort (remove index moving) #'<)))
+      (setf grown nil)
+      ;; what rests on moving parts alone
+      (dolist (i all)
+        (let ((under (nth i supports)))
+          (when (and under (not (member i moving)) (subsetp under moving))
+            (push i moving) (setf grown t))))
+      ;; what hangs from moving parts, off the ground
+      (let* ((rest (sort (set-difference all moving) #'<))
+             (ground (mapcar #'(lambda (k) (nth k rest))
+                             (ground-contacts (mapcar #'(lambda (i) (nth i specs)) rest))))
+             (inner (remove-if-not #'(lambda (l) (and (member (first l) rest) (member (second l) rest))) links)))
+        (dolist (group (groups n inner))
+          (when (and (subsetp group rest)
+                     (not (intersection group ground))
+                     (some #'(lambda (l) (or (and (member (first l) group) (member (second l) moving))
+                                             (and (member (second l) group) (member (first l) moving))))
+                           links))
+            (setf moving (append group moving) grown t)))))))
 
 (defparameter *orientations*
   (let (result)

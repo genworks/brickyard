@@ -236,20 +236,33 @@ nil when there is none."
 
         ((null spec) (refuse "No such part."))
 
-        ((string= op "move")
-         (let* ((tentative (move-spec spec (v+ (spec-at spec)
-                                               (mapcar #'(lambda (k) (read-number (funcall param k)))
-                                                       '("dx" "dy" "dz")))))
-                (reach (if (string= (or (funcall param "exact") "") "1") 0 40))
-                (dropped (drop-spec tentative (others-than specs id) :reach reach)))
-           (if dropped
-               (replace-spec dropped)
-               (reply assembly :ok nil :changed (list id) :message "No room there."))))
+        ((string= op "carried")
+         (json-object :ok t :carried (coerce (mapcar #'(lambda (i) (spec-id (nth i specs)))
+                                                     (carried specs (position spec specs)))
+                                             'vector)))
 
-        ((member op '("turn" "tilt" "roll") :test #'string=)
-         (let* ((about (cdr (assoc op '(("turn" . :z) ("tilt" . :x) ("roll" . :y)) :test #'string=)))
-                (dropped (drop-spec (turn-spec spec about) (others-than specs id))))
-           (if dropped (replace-spec dropped) (refuse "No room to turn it there."))))
+        ((member op '("move" "turn" "tilt" "roll") :test #'string=)
+         ;; the part and what it carries, unless carry=0 (shift held)
+         (let* ((group (mapcar #'(lambda (i) (nth i specs))
+                               (if (string= (or (funcall param "carry") "1") "0")
+                                   (list (position spec specs))
+                                   (carried specs (position spec specs)))))
+                (ids (mapcar #'spec-id group))
+                (others (remove-if #'(lambda (s) (member (spec-id s) ids)) specs))
+                (about (cdr (assoc op '(("turn" . :z) ("tilt" . :x) ("roll" . :y)) :test #'string=)))
+                (dropped
+                  (if about
+                      (drop-group (turn-group group about) others)
+                      (drop-group (shift-specs group (mapcar #'(lambda (k) (round (read-number (funcall param k))))
+                                                             '("dx" "dy" "dz")))
+                                  others
+                                  :reach (if (string= (or (funcall param "exact") "") "1") 0 40)))))
+           (if dropped
+               (progn
+                 (funcall store (mapcar #'(lambda (s) (or (find (spec-id s) dropped :key #'spec-id) s)) specs))
+                 (reply assembly :changed ids))
+               (reply assembly :ok nil :changed ids
+                             :message (if about "No room to turn it there." "No room there.")))))
 
         ((string= op "color")
          (let ((color (read-keyword (funcall param "color") *colors*)))
@@ -323,9 +336,10 @@ nil when there is none."
         (:h2 "Parts") (:table :id "bom")
         (:h2 "Keys")
         (:dl
-         (:dt "drag") (:dd "slide a part; it snaps on release")
+         (:dt "drag") (:dd "slide a part and what it carries; it snaps on release")
          (:dt "arrows") (:dd "nudge a stud; PgUp / PgDn a plate")
          (:dt "R T E") (:dd "turn, tilt, roll a quarter")
+         (:dt "Shift") (:dd "with any of these: the part alone")
          (:dt "C") (:dd "copy on top")
          (:dt "Del") (:dd "remove")
          (:dt "Esc") (:dd "let go"))))))))
