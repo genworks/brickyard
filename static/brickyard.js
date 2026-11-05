@@ -64,8 +64,63 @@
     messageBox.classList.toggle('shown', !!text);
   }
 
+  // Run: the server says what turns, about what line and how fast, and
+  // the page turns it; nothing goes back and forth while it runs.  Each
+  // part turns inside its own drawn Transform, about a center in the
+  // model's own coordinates, so the part itself is not moved.
+  const TURN = Math.PI;                  // a motor's radians a second: a turn in two seconds
+  const runButton = document.getElementById('run');
+  let running = null;                    // list of { part, axis, speed } while it runs
+
+  function stopMotion() {
+    if (!running) return;
+    running.forEach(function (m) {
+      m.part.inner.rotation = new X3D.SFRotation(0, 0, 1, 0);
+      m.part.inner.center = new X3D.SFVec3f(0, 0, 0);
+    });
+    running = null;
+    runButton.textContent = 'Run';
+  }
+
+  function turnFrame(now) {
+    if (!running) return;
+    if (turnFrame.start === null) turnFrame.start = now;
+    const seconds = (now - turnFrame.start) / 1000;
+    running.forEach(function (m) {
+      const angle = (m.speed * TURN * seconds) % (2 * Math.PI);
+      m.part.inner.rotation = new X3D.SFRotation(m.axis[0], m.axis[1], m.axis[2], angle);
+    });
+    requestAnimationFrame(turnFrame);
+  }
+
+  function startMotion(list) {
+    running = list.filter(function (m) { return parts.has(m.id); }).map(function (m) {
+      const part = parts.get(m.id);
+      part.inner.center = new X3D.SFVec3f(m.point[0] * LDU, m.point[1] * LDU, m.point[2] * LDU);
+      return { id: m.id, part: part, axis: m.axis, speed: m.speed };
+    });
+    runButton.textContent = 'Stop';
+    turnFrame.start = null;
+    requestAnimationFrame(turnFrame);
+  }
+
+  runButton.addEventListener('click', function () {
+    if (running) { stopMotion(); say(''); return; }
+    const body = new URLSearchParams({ b: buildId, op: 'motion' });
+    if (selected !== null) body.set('id', selected);
+    fetch('/brickyard/api', { method: 'POST', body: body })
+      .then(function (r) { return r.json(); })
+      .then(function (reply) {
+        say(reply.message || '');
+        if (reply.ok) startMotion(reply.motion);
+      })
+      .catch(function (e) { say('The server did not answer: ' + e); });
+  });
+
   async function apply(reply) {
     say(reply.message || '');
+    // a part that changed is drawn anew, and the plan no longer holds
+    if ((reply.parts || []).length || (reply.removed || []).length) stopMotion();
     removeParts(reply.removed || []);
     const changed = reply.parts || [];
     if (changed.length > 1) await putParts(changed);

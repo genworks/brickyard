@@ -295,6 +295,23 @@ nil when there is none."
                  (funcall store (append specs (list placed)))
                  (reply assembly :changed (list new-id))))))
 
+        ;; what turns, for the page to run: the motors' trains, or with
+        ;; no motor turning anything the selected part's, turned by hand
+        ((string= op "motion")
+         (multiple-value-bind (turning jammed)
+             (motion specs :survey (the-object assembly survey) :driver (and spec (position spec specs)))
+           (json-object
+            :ok (and turning t)
+            :message (cond (jammed "The train is jammed: two paths would turn a part at different speeds.")
+                           ((null turning) "Nothing turns. Add a motor, or select a gear, axle or wheel to turn it by hand."))
+            :motion (coerce (mapcar #'(lambda (entry)
+                                        (destructuring-bind (index speed point axis) entry
+                                          (json-object :id (spec-id (nth index specs)) :speed (float speed 1d0)
+                                                       :point (map 'vector #'(lambda (x) (float x 1d0)) point)
+                                                       :axis (map 'vector #'(lambda (x) (float x 1d0)) axis))))
+                                    turning)
+                            'vector))))
+
         ((null spec) (refuse "No such part."))
 
         ;; swing by hand: degrees about the pin or axle the part (and what
@@ -424,6 +441,7 @@ nil when there is none."
         (:|x3d-canvas| :id "canvas" :|contextMenu| "false" :|splashScreen| "false"
          :|notifications| "false" :|timings| "false")
         (:div :id "message")
+        (:button :type "button" :id "run" "Run")
         (when *agent*
           (cl-who:htm
            (:form :id "prompt"
@@ -443,6 +461,7 @@ nil when there is none."
          (:dt "arrows") (:dd "nudge a stud; PgUp / PgDn a plate")
          (:dt "R T E") (:dd "turn, tilt, roll a quarter")
          (:dt "[ ]") (:dd "swing 15 degrees about the pin or axle it hangs on (Alt: 5)")
+         (:dt "Run") (:dd "turn what the motors drive; with no motor, what the selected gear, axle or wheel turns")
          (:dt "Shift") (:dd "with any of these: the part alone")
          (:dt "C") (:dd "copy on top")
          (:dt "Del") (:dd "remove")

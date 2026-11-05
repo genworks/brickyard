@@ -50,6 +50,11 @@ across restarts.
   it was making for, since a hole's axis is on neither grid.  R, T and E
   turn, tilt and roll it a quarter; C copies it on top; Delete removes
   it; a swatch recolors it.
+- Run turns what the motors drive, at the speeds the report gives,
+  meshed gears together, tyres and bushes riding along; with no motor
+  turning anything, the selected gear, axle or wheel is turned by hand
+  and takes its train with it.  Any change stops it.  It turns parts
+  about their own axes and no more: the build stays where it is.
 - The report counts joined pairs and names overlapping and loose
   parts, and keeps the parts list.
 

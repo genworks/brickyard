@@ -756,12 +756,18 @@ An axle in a round pin hole turns freely and carries nothing."
   "Part types that carry turning along their axle: an axle-pin's axle end
 turns what sits on it as an axle does; its pin end turns freely.")
 
-(defun power-flow-of (specs survey)
-  (let* ((n (length specs))
-         (types (coerce (mapcar #'spec-type specs) 'vector))
+(defun spread-turning (specs survey seeds)
+  "Two values, following power from seeds, a list of (index speed): a hash
+table from each part it reaches to its speed, and a list of the indices
+two paths would turn at different speeds.  A speed is about the axis all
+the parts of a train share, so a mesh reverses it however the two gears
+happen to face."
+  (let* ((types (coerce (mapcar #'spec-type specs) 'vector))
          (table (pair-table survey))
          (near (neighbors survey))
-         drives jammed)
+         (speeds (make-hash-table))
+         (queue (copy-list seeds))
+         jammed)
     (labels ((held-p (i kind-i j kind-j) (held-by-p table i kind-i j kind-j))
              (teeth (i) (first (spec-size (nth i specs))))
              (onward (i speed)
@@ -779,26 +785,97 @@ turns what sits on it as an axle does; its pin end turns freely.")
                         (when (and (eql (aref types i) :gear) (eql (aref types j) :gear)
                                    (held-p i :gear j :gear))
                           (push (list j (- (* speed (/ (teeth i) (teeth j))))) result)))))))))
-      (dotimes (m n)
-        (when (eql (aref types m) :motor)
-          (let ((speeds (make-hash-table))
-                (queue (remove nil (mapcar #'(lambda (j)
-                                               (when (and (member (aref types j) *shafts*)
-                                                          (held-p m :axle-hole j :axle))
-                                                 (list j 1)))
-                                           (aref near m)))))
-            (do () ((null queue))
-              (destructuring-bind (i speed) (pop queue)
-                (multiple-value-bind (known seen?) (gethash i speeds)
-                  (cond ((not seen?)
-                         (setf (gethash i speeds) speed)
-                         (setf queue (append queue (onward i speed))))
-                        ((/= known speed) (pushnew i jammed))))))
-            (dotimes (w n)
-              (when (member (aref types w) '(:wheel :rim))
-                (multiple-value-bind (speed seen?) (gethash w speeds)
-                  (when seen? (push (list m w speed) drives))))))))
-      (values (nreverse drives) (sort jammed #'<)))))
+      (do () ((null queue))
+        (destructuring-bind (i speed) (pop queue)
+          (multiple-value-bind (known seen?) (gethash i speeds)
+            (cond ((not seen?)
+                   (setf (gethash i speeds) speed)
+                   (setf queue (append queue (onward i speed))))
+                  ((/= known speed) (pushnew i jammed))))))
+      (values speeds jammed))))
+
+(defun motor-seeds (specs survey m)
+  "List of (index 1): the shafts motor m's output holds."
+  (let ((table (pair-table survey)))
+    (remove nil (mapcar #'(lambda (j)
+                            (when (and (member (spec-type (nth j specs)) *shafts*)
+                                       (held-by-p table m :axle-hole j :axle))
+                              (list j 1)))
+                        (aref (neighbors survey) m)))))
+
+(defun motors-turning (specs survey)
+  "Three values: a hash table from each part the motors turn to its speed;
+a list of the indices jammed, by two paths from one motor or by two
+motors at odds; and a list of (motor speeds), each motor's own table."
+  (let ((all (make-hash-table)) jammed trains)
+    (dotimes (m (length specs))
+      (when (eql (spec-type (nth m specs)) :motor)
+        (multiple-value-bind (speeds jam) (spread-turning specs survey (motor-seeds specs survey m))
+          (setf jammed (union jam jammed))
+          (push (list m speeds) trains)
+          (maphash #'(lambda (i speed)
+                       (multiple-value-bind (known seen?) (gethash i all)
+                         (when (and seen? (/= known speed)) (pushnew i jammed)))
+                       (setf (gethash i all) speed))
+                   speeds))))
+    (values all (sort jammed #'<) (nreverse trains))))
+
+(defun power-flow-of (specs survey)
+  (multiple-value-bind (all jammed trains) (motors-turning specs survey)
+    (declare (ignore all))
+    (let (drives)
+      (dolist (train trains)
+        (destructuring-bind (m speeds) train
+          (dotimes (w (length specs))
+            (when (member (spec-type (nth w specs)) '(:wheel :rim))
+              (multiple-value-bind (speed seen?) (gethash w speeds)
+                (when seen? (push (list m w speed) drives)))))))
+      (values (nreverse drives) jammed))))
+
+;;
+;; What turns, for the page to show it turning: the same speeds, each with
+;; the line its part turns about.
+;;
+
+(defun shared-axis (dir)
+  "The direction dir or its opposite, whichever is first positive: the one
+axis every part on a line and every gear of a train turns about."
+  (let ((lead (find-if #'(lambda (x) (> (abs x) 1/1000)) dir)))
+    (if (and lead (minusp lead)) (mapcar #'- dir) dir)))
+
+(defun turning-line (spec)
+  "List of point and axis: the line spec turns about, or nil for a part that does not turn."
+  (let* ((kind (cond ((member (spec-type spec) *shafts*) :axle)
+                     ((eql (spec-type spec) :gear) :gear)
+                     ((member (spec-type spec) '(:wheel :rim)) :axle-hole)))
+         (connector (and kind (find kind (world-connectors spec) :key #'connector-kind))))
+    (when connector
+      (list (connector-point connector) (shared-axis (connector-dir connector))))))
+
+(defun motion (specs &key (survey (survey specs)) driver)
+  "Two values.  A list of (index speed point axis) for every part that
+turns, speed against a motor's own: what the motors turn, or failing
+that what part index driver turns when turned by hand.  And a list of
+the indices of jammed parts; then nothing is said to turn.  What rides
+along counts too: a tyre on its rim, a bush on its axle."
+  (multiple-value-bind (speeds jammed) (motors-turning specs survey)
+    (when (and (zerop (hash-table-count speeds)) driver (turning-line (nth driver specs)))
+      (multiple-value-setq (speeds jammed) (spread-turning specs survey (list (list driver 1)))))
+    (if jammed
+        (values nil (sort (copy-list jammed) #'<))
+        (let ((table (pair-table survey))
+              (near (neighbors survey))
+              result)
+          (maphash #'(lambda (i speed)
+                       (destructuring-bind (point axis) (turning-line (nth i specs))
+                         (push (list i speed point axis) result)
+                         (dolist (j (aref near i))
+                           (when (or (held-by-p table j :tyre-seat i :rim-seat)
+                                     (and (eql (spec-type (nth j specs)) :bush)
+                                          (held-by-p table j :axle-hole i :axle)))
+                             (push (list j speed point axis) result)))))
+                   speeds)
+          (values (remove-duplicates (sort result #'< :key #'first) :key #'first) nil)))))
 
 (defun ground-contacts (specs &key (tolerance 2))
   "List of indices of the parts whose lowest point is within tolerance LDU of the build's."
