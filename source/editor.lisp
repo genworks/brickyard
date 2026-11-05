@@ -580,6 +580,10 @@ ordinary POST gets its answer.  A larger one is closed on.")
           ((null declared) t)
           (t (let ((length (declared-length req))) (and length (<= 0 length limit)))))))
 
+(defun bodiless-get-p (req)
+  (and (member (net.aserve:request-method req) '(:get :head))
+       (body-within-p req 0)))
+
 (defun close-after-reply! (req)
   "Called inside with-http-response: the connection closes after this
 reply, so the request's body is not read first."
@@ -639,14 +643,14 @@ the gate looks for ?invite=, and looking reads a form-encoded body."
                  (funcall handler req ent))))))
 
 (defun publish-invite-door (server)
-  "Publish /brickyard/invite/<token>.  The door is a link, so a body is no
-business of it; its own refusal would keep alive and read one."
+  "Publish /brickyard/invite/<token>.  The door is a link, so it answers
+GET with no body; its own refusal would keep alive and read one."
   (when (gate)
     (let ((prefix "/brickyard/invite/"))
       (net.aserve:publish-prefix
        :prefix prefix :server server
        :function #'(lambda (req ent)
-                     (if (and (body-within-p req 0) (member (declared-length req) '(nil 0)))
+                     (if (bodiless-get-p req)
                          (uiop:symbol-call :invite-gate :invite-door (gate) req ent
                                            (subseq (net.uri:uri-path (net.aserve:request-uri req))
                                                    (length prefix)))
@@ -661,7 +665,27 @@ business of it; its own refusal would keep alive and read one."
   (gwl:with-all-servers (server) (publish-invite-door server))
   *gate*)
 
+(defparameter *static-files*
+  '(("brickyard.js" . "application/javascript; charset=utf-8")
+    ("brickyard.css" . "text/css; charset=utf-8"))
+  "List of (name . content type): what /brickyard/static/ serves.")
+
+(defun not-found (req ent)
+  (refuse-closing req ent net.aserve:*response-not-found* "text/plain" "Not found."))
+
+(defun static-handler (req ent)
+  "The page's script and style, open to all; a published directory, and
+AllegroServe's own 404 for anything else, would read a POST's body."
+  (let* ((path (net.uri:uri-path (net.aserve:request-uri req)))
+         (name (subseq path (length "/brickyard/static/")))
+         (type (cdr (assoc name *static-files* :test #'string=))))
+    (if (and type (bodiless-get-p req))
+        (respond req ent type (uiop:read-file-string (merge-pathnames name *static-directory*)))
+        (not-found req ent))))
+
 (defun publish-brickyard (server)
+  ;; the proxy sends everything under /brickyard here, published or not
+  (net.aserve:publish-prefix :prefix "/brickyard" :server server :function #'not-found)
   (dolist (path '("/brickyard" "/brickyard/"))
     (net.aserve:publish :path path :server server :function (gated #'page-handler)))
   (net.aserve:publish :path "/brickyard/api" :server server :function (gated #'api-handler))
@@ -671,8 +695,7 @@ business of it; its own refusal would keep alive and read one."
   (net.aserve:publish :path "/brickyard/export" :server server :function (gated #'export-handler))
   (net.aserve:publish :path "/brickyard/import" :server server
                       :function (gated #'import-handler :limit (getf *ldraw-limits* :bytes)))
-  (net.aserve:publish-directory :prefix "/brickyard/static/" :server server
-                                :destination (namestring *static-directory*))
+  (net.aserve:publish-prefix :prefix "/brickyard/static/" :server server :function #'static-handler)
   (publish-invite-door server))
 
 ;; Published with the rest when the server starts; and now, on Gendl's
