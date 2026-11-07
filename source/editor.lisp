@@ -33,7 +33,9 @@
 
 (defvar *builds-lock* (bt:make-lock "brickyard builds"))
 
-(defvar *agent* nil "The prompt box's sexp-agent, when prompting has opened it (api.lisp).")
+(defvar *agents* nil
+  "List of (name . sexp-agent): the models the prompt box offers, the first
+the one it starts on.  Empty until prompting opens the box (api.lisp).")
 
 (defparameter *palette*
   '(("Bricks" (:brick (1 1)) (:brick (1 2)) (:brick (1 4)) (:brick (2 2)) (:brick (2 4)) (:brick (2 6)))
@@ -442,12 +444,18 @@ nil when there is none."
          :|notifications| "false" :|timings| "false")
         (:div :id "message")
         (:button :type "button" :id "run" "Run")
-        (when *agent*
+        (when *agents*
           (cl-who:htm
            (:form :id "prompt"
             (:div :class "prompt-row"
              (:textarea :id "prompt-text" :rows "1" :maxlength "2000"
                         :placeholder "Describe what to build: a small car with four wheels" "")
+             (when (rest *agents*)
+               (cl-who:htm
+                (:select :id "prompt-model" :title "The model that builds"
+                 (dolist (entry *agents*)
+                   (let ((name (cl-who:escape-string (first entry))))
+                     (cl-who:htm (:option :value name (cl-who:str name))))))))
              (:button :type "submit" :id "prompt-go" "Build")
              (:button :type "button" :id "prompt-undo" :hidden "hidden" "Undo"))
             (:div :id "prompt-reply" :hidden "hidden"))))

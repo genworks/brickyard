@@ -93,6 +93,19 @@ the page asks after it, and Undo puts the build back as it stood before
 the prompt.  `GET /brickyard/api/reference` serves the reference the
 model reads.
 
+Call `prompting` again with `:add? t` to offer a second model, and the
+box grows a menu, the first one offered being the default:
+
+```lisp
+(brickyard:prompting "http://gate/llm/messages" :name "Opus 5.5")
+(brickyard:prompting "http://ollama:11434/v1/messages" :add? t
+                     :name "Local" :model "ornith-1.5:9b")
+```
+
+Any server that speaks Anthropic's Messages API will do, and Ollama
+does at `/v1/messages`.  The page sends the name it chose, the server
+answers only for names it offers, and the browser remembers the choice.
+
 For a private beta, load Gendl's `invite-gate` before Brickyard and
 close the gate to a roster kept on the server:
 

@@ -152,6 +152,16 @@ button.swatch.chosen { outline: 2px solid var(--accent); outline-offset: 1px; }
   resize: vertical;
 }
 
+#prompt-model {
+  max-width: 11em;
+  padding: 5px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+
 #prompt button {
   padding: 5px 10px;
   border: 1px solid var(--line);

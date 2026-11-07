@@ -318,6 +318,18 @@
   const promptGo = document.getElementById('prompt-go');
   const promptUndo = document.getElementById('prompt-undo');
   const promptReply = document.getElementById('prompt-reply');
+  const promptModel = document.getElementById('prompt-model');
+
+  // The chosen model is remembered in this browser, when it may remember.
+  if (promptModel) {
+    try {
+      const kept = localStorage.getItem('brickyard-model');
+      if (kept && Array.from(promptModel.options).some(function (o) { return o.value === kept; })) promptModel.value = kept;
+    } catch (e) {}
+    promptModel.addEventListener('change', function () {
+      try { localStorage.setItem('brickyard-model', promptModel.value); } catch (e) {}
+    });
+  }
 
   function promptCall(args) {
     const body = new URLSearchParams(Object.assign({ b: buildId }, args));
@@ -327,6 +339,7 @@
   function promptBusy(on) {
     promptGo.disabled = on;
     promptText.disabled = on;
+    if (promptModel) promptModel.disabled = on;
     promptGo.textContent = on ? 'Building ...' : 'Build';
   }
 
@@ -376,7 +389,7 @@
       if (!text || promptGo.disabled) return;
       promptBusy(true);
       promptSay('');
-      promptCall({ action: 'start', prompt: text })
+      promptCall({ action: 'start', prompt: text, model: promptModel ? promptModel.value : '' })
         .then(function (reply) {
           if (reply.ok) { promptText.value = ''; promptWait(0); }
           else { promptBusy(false); say(reply.message); }

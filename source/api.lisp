@@ -292,6 +292,13 @@ to the side of the build."
 ;;
 ;;   (brickyard:prompting "http://gate/llm/messages")
 ;;
+;; More than one model may be offered, and the box then has a menu.  The
+;; page names one and the server looks it up, so a request can never aim
+;; the server at an address of its own:
+;;
+;;   (brickyard:prompting "http://ollama:11434/v1/messages" :add? t
+;;                        :name "Gemma 4 12B (local)" :model "gemma4:12b")
+;;
 ;; A model can take longer than a proxy holds a request open, so a prompt
 ;; runs on its own thread and the page asks after it: POST
 ;; /brickyard/api/prompt with b and action start (and prompt), poll or
@@ -311,14 +318,29 @@ to the side of the build."
 (defvar *before-prompt* (make-hash-table :test #'equal)
   "Hash table from build id to its specs before the last prompt: what undo restores.")
 
-(defun prompting (messages-url &key api-key-file)
-  "Open the prompt box, its model reached at messages-url: a gate that
-holds the key, or the API itself with api-key-file."
+(defun prompting (messages-url &key (name "Opus 5.5") model effort max-tokens call-seconds api-key-file add?)
+  "Open the prompt box on the model at messages-url: a gate that holds
+the key, a local model server, or the API itself with api-key-file.
+With add?, offer it beside the models already offered, under name; a
+name offered already is replaced.  Answers the agent."
   (unless (find-package :sexp-agent) (error "Load Gendl's sexp-agent first."))
-  (setf *agent* (uiop:symbol-call :sexp-agent :make-agent
-                                  :name "Brickyard" :package :brickyard-api :operators *operators*
-                                  :reference #'reference-text :messages-url messages-url
-                                  :api-key-file api-key-file)))
+  (let ((agent (apply #'uiop:symbol-call :sexp-agent :make-agent
+                      :name "Brickyard" :package :brickyard-api :operators *operators*
+                      :reference #'reference-text :messages-url messages-url
+                      :api-key-file api-key-file
+                      (append (when model (list :model model))
+                              (when effort (list :effort effort))
+                              (when max-tokens (list :max-tokens max-tokens))
+                              (when call-seconds (list :call-seconds call-seconds))))))
+    (setf *agents* (append (when add? (remove name *agents* :key #'first :test #'string=))
+                           (list (cons name agent))))
+    agent))
+
+(defun find-agent (name)
+  "The agent offered under name, the first offered for none, or nil."
+  (if (and name (plusp (length name)))
+      (cdr (assoc name *agents* :test #'string=))
+      (cdr (first *agents*))))
 
 (defun specs-change (before after)
   "Values: the ids in after that are new or differ from before, and the ids gone."
@@ -344,10 +366,9 @@ holds the key, or the API itself with api-key-file."
               (gethash "forms" reply) (coerce (getf answer :forms) 'vector))
         reply))))
 
-(defun run-prompt (id prompt session)
+(defun run-prompt (id prompt session agent)
   "Ask the model, run what it answers on build id, and leave the reply in *prompts*."
   (let* ((*api-build* id)
-         (agent *agent*)
          (history (bt:with-lock-held (*builds-lock*) (gethash id *histories*)))
          (state (bt:with-lock-held (*builds-lock*) (describe-assembly (find-build id))))
          (answer (handler-case
@@ -365,9 +386,11 @@ holds the key, or the API itself with api-key-file."
         (format nil "brickyard-~(~36r~)" (sxhash token))
         (format nil "brickyard-~a" id))))
 
-(defun start-prompt (req id prompt)
-  (let ((prompt (string-trim '(#\Space #\Tab #\Newline #\Return) (or prompt ""))))
-    (cond ((null *agent*) (json-object :ok nil :message "There is no prompt box here."))
+(defun start-prompt (req id prompt model)
+  (let ((prompt (string-trim '(#\Space #\Tab #\Newline #\Return) (or prompt "")))
+        (agent (find-agent model)))
+    (cond ((null *agents*) (json-object :ok nil :message "There is no prompt box here."))
+          ((null agent) (json-object :ok nil :message "That model is not offered here."))
           ((string= prompt "") (json-object :ok nil :message "Say what to build."))
           ((> (length prompt) *prompt-limit*)
            (json-object :ok nil :message (format nil "A prompt is at most ~a characters." *prompt-limit*)))
@@ -377,7 +400,7 @@ holds the key, or the API itself with api-key-file."
            (setf (gethash id *prompts*) :running
                  (gethash id *before-prompt*) (the-object (find-build id) part-specs))
            (let ((session (prompt-session req id)))
-             (bt:make-thread #'(lambda () (run-prompt id prompt session)) :name "brickyard prompt"))
+             (bt:make-thread #'(lambda () (run-prompt id prompt session agent)) :name "brickyard prompt"))
            (json-object :ok t :pending t)))))
 
 (defun poll-prompt (id)
@@ -410,7 +433,8 @@ holds the key, or the API itself with api-key-file."
          (action (funcall param "action"))
          (result (bt:with-lock-held (*builds-lock*)
                    (cond ((null (find-build id)) (json-object :ok nil :message "No such build."))
-                         ((equal action "start") (start-prompt req id (funcall param "prompt")))
+                         ((equal action "start")
+                          (start-prompt req id (funcall param "prompt") (funcall param "model")))
                          ((equal action "poll") (poll-prompt id))
                          ((equal action "undo") (undo-prompt id))
                          (t (json-object :ok nil :message "Unknown action."))))))
