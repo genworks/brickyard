@@ -117,10 +117,126 @@
       .catch(function (e) { say('The server did not answer: ' + e); });
   });
 
+  // The table: the build stands on it as a robot and runs a program.  The
+  // server runs it and answers frames, whole numbers as they say in
+  // table.lisp, and the page plays them back: the robot's Transform, each
+  // turning part inside its own, and each piece.
+  const tableToggle = document.getElementById('table-toggle');
+  const tablePanel = document.getElementById('table-panel');
+  const programText = document.getElementById('program');
+  const programLog = document.getElementById('program-log');
+  let table = null;                      // { node, pieces, center, lift, drives } while it is out
+
+  function tableCall(args) {
+    const body = new URLSearchParams(Object.assign({ b: buildId }, args));
+    return fetch('/brickyard/api/table', { method: 'POST', body: body }).then(function (r) { return r.json(); });
+  }
+
+  function placeFrame(f) {
+    const center = table.center, turning = table.drives;
+    group.center = new X3D.SFVec3f(center[0], center[1], 0);
+    group.translation = new X3D.SFVec3f(f[1] / 10 - center[0], f[2] / 10 - center[1], table.lift);
+    group.rotation = new X3D.SFRotation(0, 0, 1, f[3] / 1000);
+    turning.forEach(function (drive, i) {
+      const angle = f[4 + i] / 1000;
+      drive.forEach(function (p) {
+        if (!parts.has(p.id)) return;
+        const inner = parts.get(p.id).inner;
+        inner.center = new X3D.SFVec3f(p.point[0] * LDU, p.point[1] * LDU, p.point[2] * LDU);
+        inner.rotation = new X3D.SFRotation(p.axis[0], p.axis[1], p.axis[2], (p.speed * angle) % (2 * Math.PI));
+      });
+    });
+    table.pieces.forEach(function (piece, i) {
+      const at = 4 + turning.length + 3 * i;
+      piece.translation = new X3D.SFVec3f(f[at] / 10, f[at + 1] / 10, 0);
+      piece.rotation = new X3D.SFRotation(0, 0, 1, f[at + 2] / 1000);
+    });
+  }
+
+  function playFrames(frames) {
+    const run = table.run = {};
+    let start = null, at = 0;
+    function frame(now) {
+      if (!table || table.run !== run) return;
+      if (start === null) start = now;
+      const ms = now - start;
+      while (at + 1 < frames.length && frames[at + 1][0] <= ms) at++;
+      placeFrame(frames[at]);
+      if (at + 1 < frames.length) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function logRun(reply) {
+    programLog.textContent = (reply.steps || []).concat(reply.summary || []).join('\n');
+  }
+
+  async function openTable() {
+    const reply = await tableCall({ action: 'open' });
+    if (!reply.ok) { say(reply.message); return; }
+    stopMotion();
+    const scene = await browser.createX3DFromString(reply.x3d);
+    const world = browser.currentScene.getNamedNode('world');
+    const node = scene.getNamedNode('table');
+    const pieces = [];
+    for (let i = 0; i < reply.frames[0].length; i++) {
+      let piece = null;
+      try { piece = scene.getNamedNode('t' + i); } catch (e) { break; }
+      pieces.push(piece);
+    }
+    world.addChildren = new X3D.MFNode(node);
+    table = { node: node, pieces: pieces, center: reply.center, lift: reply.lift, drives: reply.drives };
+    parts.forEach(function (part) { part.sensor.enabled = false; });
+    placeFrame(reply.frames[0]);
+    browser.currentScene.getNamedNode('table-eye').set_bind = true;
+    tablePanel.hidden = false;
+    runButton.hidden = true;
+    tableToggle.textContent = 'Back to the build';
+    say('');
+  }
+
+  function closeTable() {
+    if (!table) return;
+    browser.currentScene.getNamedNode('world').removeChildren = new X3D.MFNode(table.node);
+    table.drives.forEach(function (drive) {
+      drive.forEach(function (p) {
+        if (!parts.has(p.id)) return;
+        parts.get(p.id).inner.rotation = new X3D.SFRotation(0, 0, 1, 0);
+        parts.get(p.id).inner.center = new X3D.SFVec3f(0, 0, 0);
+      });
+    });
+    table = null;
+    group.center = new X3D.SFVec3f(0, 0, 0);
+    group.translation = new X3D.SFVec3f(0, 0, 0);
+    group.rotation = new X3D.SFRotation(0, 0, 1, 0);
+    parts.forEach(function (part) { part.sensor.enabled = true; });
+    browser.currentScene.getNamedNode('eye').set_bind = true;
+    tablePanel.hidden = true;
+    runButton.hidden = false;
+    tableToggle.textContent = 'Table';
+    programLog.textContent = '';
+  }
+
+  tableToggle.addEventListener('click', function () {
+    if (table) closeTable();
+    else openTable().catch(function (e) { say('The table did not open: ' + e); });
+  });
+
+  tablePanel.addEventListener('submit', function (e) {
+    e.preventDefault();
+    tableCall({ action: 'run', program: programText.value })
+      .then(function (reply) {
+        if (!table) return;
+        say(reply.message || '');
+        if (reply.ok) { logRun(reply); playFrames(reply.frames); }
+      })
+      .catch(function (err) { say('The server did not answer: ' + err); });
+  });
+
   async function apply(reply) {
     say(reply.message || '');
     // a part that changed is drawn anew, and the plan no longer holds
-    if ((reply.parts || []).length || (reply.removed || []).length) stopMotion();
+    if ((reply.parts || []).length || (reply.removed || []).length) { stopMotion(); closeTable(); }
     removeParts(reply.removed || []);
     const changed = reply.parts || [];
     if (changed.length > 1) await putParts(changed);

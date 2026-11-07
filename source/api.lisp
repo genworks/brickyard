@@ -297,7 +297,7 @@ to the side of the build."
 ;; the server at an address of its own:
 ;;
 ;;   (brickyard:prompting "http://ollama:11434/v1/messages" :add? t
-;;                        :name "Gemma 4 12B (local)" :model "gemma4:12b")
+;;                        :name "Ornith 9B (local)" :model "ornith-1.5:9b")
 ;;
 ;; A model can take longer than a proxy holds a request open, so a prompt
 ;; runs on its own thread and the page asks after it: POST
@@ -318,11 +318,13 @@ to the side of the build."
 (defvar *before-prompt* (make-hash-table :test #'equal)
   "Hash table from build id to its specs before the last prompt: what undo restores.")
 
-(defun prompting (messages-url &key (name "Opus 5.5") model effort max-tokens call-seconds api-key-file add?)
+(defun prompting (messages-url &key (name "Opus 5.5") model effort max-tokens call-seconds api-key-file add? turn)
   "Open the prompt box on the model at messages-url: a gate that holds
 the key, a local model server, or the API itself with api-key-file.
 With add?, offer it beside the models already offered, under name; a
-name offered already is replaced.  Answers the agent."
+name offered already is replaced.  With turn, a function of one thunk,
+every prompt to this model runs inside it, for a model that shares
+hardware and has to wait its turn.  Answers the agent."
   (unless (find-package :sexp-agent) (error "Load Gendl's sexp-agent first."))
   (let ((agent (apply #'uiop:symbol-call :sexp-agent :make-agent
                       :name "Brickyard" :package :brickyard-api :operators *operators*
@@ -333,14 +335,14 @@ name offered already is replaced.  Answers the agent."
                               (when max-tokens (list :max-tokens max-tokens))
                               (when call-seconds (list :call-seconds call-seconds))))))
     (setf *agents* (append (when add? (remove name *agents* :key #'first :test #'string=))
-                           (list (cons name agent))))
+                           (list (list name agent (or turn #'funcall)))))
     agent))
 
 (defun find-agent (name)
-  "The agent offered under name, the first offered for none, or nil."
+  "The entry of *agents* offered under name, the first offered for none, or nil."
   (if (and name (plusp (length name)))
-      (cdr (assoc name *agents* :test #'string=))
-      (cdr (first *agents*))))
+      (assoc name *agents* :test #'string=)
+      (first *agents*)))
 
 (defun specs-change (before after)
   "Values: the ids in after that are new or differ from before, and the ids gone."
@@ -366,18 +368,24 @@ name offered already is replaced.  Answers the agent."
               (gethash "forms" reply) (coerce (getf answer :forms) 'vector))
         reply))))
 
-(defun run-prompt (id prompt session agent)
-  "Ask the model, run what it answers on build id, and leave the reply in *prompts*."
-  (let* ((*api-build* id)
-         (history (bt:with-lock-held (*builds-lock*) (gethash id *histories*)))
-         (state (bt:with-lock-held (*builds-lock*) (describe-assembly (find-build id))))
-         (answer (handler-case
-                     (uiop:symbol-call :sexp-agent :ask agent prompt
-                                       :state-text state :session-id session :history history)
-                   (serious-condition (e)
-                     (list :ok nil :error (format nil "The model did not answer: ~a" e))))))
-    (bt:with-lock-held (*builds-lock*)
-      (setf (gethash id *prompts*) (finished-prompt id prompt answer)))))
+(defun run-prompt (id prompt session offered)
+  "Ask the model offered, an entry of *agents*, run what it answers on
+build id, and leave the reply in *prompts*."
+  (destructuring-bind (name agent turn) offered
+    (declare (ignore name))
+    (let* ((*api-build* id)
+           (history (bt:with-lock-held (*builds-lock*) (gethash id *histories*)))
+           (state (bt:with-lock-held (*builds-lock*) (describe-assembly (find-build id))))
+           (answer (handler-case
+                       (funcall turn
+                                #'(lambda ()
+                                    (uiop:symbol-call :sexp-agent :ask agent prompt
+                                                      :state-text state :session-id session
+                                                      :history history)))
+                     (serious-condition (e)
+                       (list :ok nil :error (format nil "The model did not answer: ~a" e))))))
+      (bt:with-lock-held (*builds-lock*)
+        (setf (gethash id *prompts*) (finished-prompt id prompt answer))))))
 
 (defun prompt-session (req id)
   "The id the model's gate counts a person's spending under: their invite, else the build."
@@ -388,9 +396,9 @@ name offered already is replaced.  Answers the agent."
 
 (defun start-prompt (req id prompt model)
   (let ((prompt (string-trim '(#\Space #\Tab #\Newline #\Return) (or prompt "")))
-        (agent (find-agent model)))
+        (offered (find-agent model)))
     (cond ((null *agents*) (json-object :ok nil :message "There is no prompt box here."))
-          ((null agent) (json-object :ok nil :message "That model is not offered here."))
+          ((null offered) (json-object :ok nil :message "That model is not offered here."))
           ((string= prompt "") (json-object :ok nil :message "Say what to build."))
           ((> (length prompt) *prompt-limit*)
            (json-object :ok nil :message (format nil "A prompt is at most ~a characters." *prompt-limit*)))
@@ -400,7 +408,7 @@ name offered already is replaced.  Answers the agent."
            (setf (gethash id *prompts*) :running
                  (gethash id *before-prompt*) (the-object (find-build id) part-specs))
            (let ((session (prompt-session req id)))
-             (bt:make-thread #'(lambda () (run-prompt id prompt session agent)) :name "brickyard prompt"))
+             (bt:make-thread #'(lambda () (run-prompt id prompt session offered)) :name "brickyard prompt"))
            (json-object :ok t :pending t)))))
 
 (defun poll-prompt (id)
@@ -443,3 +451,61 @@ name offered already is replaced.  Answers the agent."
 
 (defun reference-handler (req ent)
   (respond req ent "text/markdown; charset=utf-8" (reference-text)))
+
+;;
+;; The table: the build as a robot, a program run on it (table.lisp).  A
+;; run is quick, a few hundredths of a second for a minute's driving, and
+;; the builds stay unlocked while it goes.  The page plays back the frames.
+;;
+
+(defun brickyard-api:run-on-table (program)
+  "Stand the current build on the table and run program, a list of steps
+such as (:go 300) (:turn 90) (:power 0.5 0.2 2) (:wait 1).  A plist of
+what came of it: :steps :robot :heading :seconds :pieces :over :summary."
+  (let* ((steps (checked-program program))
+         (robot (with-api-build (assembly) (robot-of assembly)))
+         (result (run-program robot steps)))
+    (list :steps (mapcar #'step-line (getf result :steps))
+          :robot (getf result :robot) :heading (getf result :heading)
+          :seconds (getf result :seconds) :pieces (getf result :pieces) :over (getf result :over)
+          :summary (run-summary result))))
+
+(defun table-json (robot result open?)
+  (let ((frames (getf result :frames)))
+    (flet ((numbers (list) (map 'vector #'(lambda (x) (float x 1d0)) list)))
+      (json-object
+       :ok t
+       :x3d (and open? (table-x3d))
+       :center (numbers (robot-center robot))
+       :lift (float (robot-lift robot) 1d0)
+       :drives (map 'vector
+                    #'(lambda (drive)
+                        (map 'vector
+                             #'(lambda (part)
+                                 (destructuring-bind (id speed point axis) part
+                                   ;; about its axis a wheel turns back as it rolls ahead
+                                   (json-object :id id
+                                                :speed (float (if (plusp (drive-wheels drive)) (- speed) speed) 1d0)
+                                                :point (numbers point) :axis (numbers axis))))
+                             (drive-parts drive)))
+                    (robot-drives robot))
+       :frames (if open? (subseq frames 0 1) frames)
+       :steps (coerce (mapcar #'step-line (getf result :steps)) 'vector)
+       :summary (coerce (run-summary result) 'vector)))))
+
+(defun table-answer (id action text)
+  (let* ((open? (equal action "open"))
+         (program (if open? nil (checked-program (read-program (or text "")))))
+         (robot (bt:with-lock-held (*builds-lock*)
+                  (let ((assembly (find-build id)))
+                    (if assembly (robot-of assembly) (error "No such build."))))))
+    (table-json robot (run-program robot program) open?)))
+
+(defun table-handler (req ent)
+  "POST b and action: open, or run with program."
+  (let* ((params (net.aserve:form-urlencoded-to-query (gwl:request-body-text req)))
+         (param #'(lambda (name) (cdr (assoc name params :test #'string=))))
+         (result (handler-case (table-answer (funcall param "b") (funcall param "action") (funcall param "program"))
+                   (serious-condition (e) (json-object :ok nil :message (princ-to-string e))))))
+    (respond req ent "application/json"
+             (with-output-to-string (s) (yason:encode result s)))))

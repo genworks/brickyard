@@ -852,6 +852,56 @@ axis every part on a line and every gear of a train turns about."
     (when connector
       (list (connector-point connector) (shared-axis (connector-dir connector))))))
 
+(defun riding-groups (specs survey speeds)
+  "List of (shaft . parts): what swings with a shaft that speeds says
+turns, held on it by an axle hole and held to nothing that stays: an
+arm, and all that is built on it.  What stays is the largest body of
+parts left when the turning parts are taken away."
+  (let* ((table (pair-table survey))
+         (near (neighbors survey))
+         (turning-p #'(lambda (i) (nth-value 1 (gethash i speeds))))
+         (links (loop for (i j joints) in (survey-pairs survey)
+                      when (and joints (not (funcall turning-p i)) (not (funcall turning-p j)))
+                        collect (list i j)))
+         (bodies (groups (length specs) links))
+         (stays (reduce #'(lambda (best g) (if (> (length g) (length best)) g best)) bodies :initial-value nil))
+         result)
+    (maphash #'(lambda (i speed)
+                 (declare (ignore speed))
+                 (when (member (spec-type (nth i specs)) *shafts*)
+                   (dolist (j (aref near i))
+                     (when (and (not (funcall turning-p j))
+                                (not (eql (spec-type (nth j specs)) :bush))
+                                (held-by-p table j :axle-hole i :axle))
+                       (let ((body (find-if #'(lambda (g) (member j g)) bodies)))
+                         (unless (or (eq body stays) (find body result :key #'rest :test #'eq))
+                           (push (cons i body) result)))))))
+             speeds)
+    result))
+
+(defun turning-entries (specs survey speeds)
+  "List of (index speed point axis): the parts speeds says turn, and what
+rides along with them: a tyre on its rim, a bush on its axle, an arm on
+its shaft."
+  (let ((table (pair-table survey))
+        (near (neighbors survey))
+        result)
+    (maphash #'(lambda (i speed)
+                 (destructuring-bind (point axis) (turning-line (nth i specs))
+                   (push (list i speed point axis) result)
+                   (dolist (j (aref near i))
+                     (when (or (held-by-p table j :tyre-seat i :rim-seat)
+                               (and (eql (spec-type (nth j specs)) :bush)
+                                    (held-by-p table j :axle-hole i :axle)))
+                       (push (list j speed point axis) result)))))
+             speeds)
+    (dolist (ride (riding-groups specs survey speeds))
+      (destructuring-bind (shaft . parts) ride
+        (destructuring-bind (point axis) (turning-line (nth shaft specs))
+          (dolist (part parts)
+            (push (list part (gethash shaft speeds) point axis) result)))))
+    (remove-duplicates (sort result #'< :key #'first) :key #'first)))
+
 (defun motion (specs &key (survey (survey specs)) driver)
   "Two values.  A list of (index speed point axis) for every part that
 turns, speed against a motor's own: what the motors turn, or failing
@@ -863,19 +913,7 @@ along counts too: a tyre on its rim, a bush on its axle."
       (multiple-value-setq (speeds jammed) (spread-turning specs survey (list (list driver 1)))))
     (if jammed
         (values nil (sort (copy-list jammed) #'<))
-        (let ((table (pair-table survey))
-              (near (neighbors survey))
-              result)
-          (maphash #'(lambda (i speed)
-                       (destructuring-bind (point axis) (turning-line (nth i specs))
-                         (push (list i speed point axis) result)
-                         (dolist (j (aref near i))
-                           (when (or (held-by-p table j :tyre-seat i :rim-seat)
-                                     (and (eql (spec-type (nth j specs)) :bush)
-                                          (held-by-p table j :axle-hole i :axle)))
-                             (push (list j speed point axis) result)))))
-                   speeds)
-          (values (remove-duplicates (sort result #'< :key #'first) :key #'first) nil)))))
+        (values (turning-entries specs survey speeds) nil))))
 
 (defun ground-contacts (specs &key (tolerance 2))
   "List of indices of the parts whose lowest point is within tolerance LDU of the build's."

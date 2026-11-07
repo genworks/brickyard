@@ -15,4 +15,4 @@
   (:use :common-lisp)
   (:export #:use-build #:new-build #:parts #:report #:joints #:describe-build
            #:add-part #:move-part #:turn-part #:swing-part #:color-part #:copy-part
-           #:remove-part #:clear-build))
+           #:remove-part #:clear-build #:run-on-table))

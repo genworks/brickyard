@@ -33,6 +33,17 @@ an axle through both, and a beam pinned to one side.")
   "List of specs. A drive base: two motors under a plate, each turning a
 wheel on an axle, the controller on top, and a skid at the front.")
 
+(defparameter *arm-build*
+  (append *robot-build*
+          '((:type :motor :at (-20 40 104) :rear :right)
+            (:type :axle :size (8) :at (70 40 128) :rear :right)
+            (:type :l-beam :size (2 4) :color :yellow :at (110 40 128) :up :rear :rear :right)
+            (:type :pin :at (120 60 128) :rear :right)
+            (:type :pin :at (120 80 128) :rear :right)
+            (:type :beam :size (13) :color :yellow :at (130 180 128))))
+  "List of specs. The drive base with a third motor on the controller: it
+swings a long beam out in front, up over what is on the mat or down to sweep it.")
+
 (defparameter *gearbox-build*
   '((:type :technic-brick :size (8) :at (-30 0 0))
     (:type :technic-brick :size (8) :at (30 0 0))

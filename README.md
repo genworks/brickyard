@@ -105,6 +105,49 @@ box grows a menu, the first one offered being the default:
 Any server that speaks Anthropic's Messages API will do, and Ollama
 does at `/v1/messages`.  The page sends the name it chose, the server
 answers only for names it offers, and the browser remembers the choice.
+A model that shares a GPU with something else can take `:turn`, a
+function of one thunk, and each of its prompts runs inside that.
+
+## The table
+
+The Table button stands the build on a robot-competition table, a mat
+of 2362 by 1143 mm inside low walls, with balls and crates to push and
+rings to bring them to.  The layout and the mat are Brickyard's own.  A
+robot there runs a program and nobody steers it:
+
+```lisp
+(go 500)              ; millimeters, by the wheels' count; negative is back
+(go 500 :speed 0.8)   ; a share of full speed, 0.5 unless it says
+(turn 90)             ; degrees to the left, by a gyroscope
+(power 0.5 0.2 2)     ; left and right power, for seconds
+(arm -25)             ; swing the arm, degrees, and hold it there
+(arm 40 :speed 0.5 :motor 9)   ; a share of full speed, and which motor
+(wait 1)
+```
+
+A motor that turns no wheel on the mat turns an arm: whatever its shaft
+carries by an axle hole, and everything built on that.  An axle across
+the robot lifts with a positive angle an arm that points ahead, and an
+upright axle swings it to the left.  Arm robot on the page is a sample.
+
+`(brickyard-api:run-on-table '((:go 500) (:turn 90) (:arm -25)))` does the same
+from Lisp and answers where everything stopped.  The server runs the
+whole program and the page plays it back.
+
+The build drives as one rigid body in the plane of the mat
+(`source/physics.lisp`, `source/table.lisp`): mass and center come from
+its parts, what it weighs on each wheel and skid from where they stand,
+and each motor pushes through its gears and wheels as far as the
+wheel's grip allows, so a wheel slips against a wall and its count runs
+on.  It faces the way its wheels roll toward +Y, and it needs a motor
+each side to turn.  Motor and friction figures are typical, not those
+of any product, and a part's mass is an estimate from its box.  An arm
+works against its own weight and what it meets, and the mat stops it,
+but it passes through the robot it is built on, and its weight does not
+shift the load on the wheels as it swings.  It sweeps and pushes; it
+does not pick up or carry.  An arm above a piece's height passes over
+it, as does a part of the body more than 64 mm above the mat.  The robot
+does not tip or climb.
 
 For a private beta, load Gendl's `invite-gate` before Brickyard and
 close the gate to a roster kept on the server:

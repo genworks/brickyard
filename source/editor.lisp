@@ -34,8 +34,9 @@
 (defvar *builds-lock* (bt:make-lock "brickyard builds"))
 
 (defvar *agents* nil
-  "List of (name . sexp-agent): the models the prompt box offers, the first
-the one it starts on.  Empty until prompting opens the box (api.lisp).")
+  "List of (name sexp-agent turn): the models the prompt box offers, the
+first the one it starts on, turn the function of one thunk its prompts
+run inside.  Empty until prompting opens the box (api.lisp).")
 
 (defparameter *palette*
   '(("Bricks" (:brick (1 1)) (:brick (1 2)) (:brick (1 4)) (:brick (2 2)) (:brick (2 4)) (:brick (2 6)))
@@ -414,6 +415,7 @@ nil when there is none."
        (:span :id "build-name" (cl-who:str build-id))
        (:a :href "/brickyard?new=1" "New build")
        (:a :href "/brickyard?new=robot" "Robot build")
+       (:a :href "/brickyard?new=arm" "Arm robot")
        (:a :href "/brickyard?new=gearbox" "Gearbox")
        (:a :href "/brickyard?new=empty" "Empty build")
        (:a :href (format nil "/brickyard/export?b=~a" build-id) :id "export" "Export LDraw")
@@ -444,6 +446,11 @@ nil when there is none."
          :|notifications| "false" :|timings| "false")
         (:div :id "message")
         (:button :type "button" :id "run" "Run")
+        (:button :type "button" :id "table-toggle" "Table")
+        (:form :id "table-panel" :hidden "hidden"
+         (:textarea :id "program" :rows "6" :spellcheck "false" (cl-who:str *sample-program*))
+         (:button :type "submit" :id "program-go" "Run program")
+         (:pre :id "program-log"))
         (when *agents*
           (cl-who:htm
            (:form :id "prompt"
@@ -470,6 +477,7 @@ nil when there is none."
          (:dt "R T E") (:dd "turn, tilt, roll a quarter")
          (:dt "[ ]") (:dd "swing 15 degrees about the pin or axle it hangs on (Alt: 5)")
          (:dt "Run") (:dd "turn what the motors drive; with no motor, what the selected gear, axle or wheel turns")
+         (:dt "Table") (:dd "stand the build on a table and run a program: (go 300) (turn 90) (arm -25) (power 0.5 0.2 2) (wait 1)")
          (:dt "Shift") (:dd "with any of these: the part alone")
          (:dt "C") (:dd "copy on top")
          (:dt "Del") (:dd "remove")
@@ -478,10 +486,16 @@ nil when there is none."
 (defun scene-x3d ()
   "The page's starting world: z-up model space inside a y-up wrapper, and
 an empty group the parts go into."
-  (format nil "<X3D profile=\"Interchange\" version=\"4.0\"><head><component name=\"PointingDeviceSensor\" level=\"1\"/></head><Scene><NavigationInfo type='\"EXAMINE\" \"ANY\"' headlight=\"true\"></NavigationInfo><Background skyColor=\"0.94 0.95 0.97\"></Background><Viewpoint DEF=\"eye\" position=\"~a\" orientation=\"~a\" fieldOfView=\"0.7\"></Viewpoint><Transform DEF=\"world\" rotation=\"~a\"><Group DEF=\"parts\"></Group></Transform></Scene></X3D>"
+  (format nil "<X3D profile=\"Interchange\" version=\"4.0\"><head><component name=\"PointingDeviceSensor\" level=\"1\"/></head><Scene><NavigationInfo type='\"EXAMINE\" \"ANY\"' headlight=\"true\" avatarSize=\"8 1.6 0.75\"></NavigationInfo><Background skyColor=\"0.94 0.95 0.97\"></Background><Viewpoint DEF=\"eye\" position=\"~a\" orientation=\"~a\" fieldOfView=\"0.7\"></Viewpoint><Viewpoint DEF=\"table-eye\" position=\"~a\" orientation=\"~a\" centerOfRotation=\"~a\" fieldOfView=\"0.7\"></Viewpoint><Transform DEF=\"world\" rotation=\"~a\"><Transform DEF=\"parts\"></Transform></Transform></Scene></X3D>"
           "180 160 240"
           (geom-base::x3d-rotation-string
            (geom-base::look-at-rotation (make-vector -180 -160 -240) (make-vector 0 1 0)))
+          ;; above the table and back from its long side, in y-up terms
+          (format nil "~a 2600 1800" (round (getf *table* :width) 2))
+          (geom-base::x3d-rotation-string
+           (geom-base::look-at-rotation (make-vector 0 -2600 (- -1800 (/ (getf *table* :depth) 2)))
+                                        (make-vector 0 1 0)))
+          (format nil "~a 0 ~a" (round (getf *table* :width) 2) (- (round (getf *table* :depth) 2)))
           geom-base::*z-up->y-up-rotation-string*))
 
 ;;
@@ -506,6 +520,7 @@ an empty group the parts go into."
                                      (bt:with-lock-held (*builds-lock*)
                                        (make-build :specs (cond ((string= new "empty") nil)
                                                                 ((string= new "robot") *robot-build*)
+                                                                ((string= new "arm") *arm-build*)
                                                                 ((string= new "gearbox") *gearbox-build*)
                                                                 (t *sample-build*)))))))
           ((and id (bt:with-lock-held (*builds-lock*) (find-build id)))
@@ -719,6 +734,7 @@ AllegroServe's own 404 for anything else, would read a POST's body."
   ;; named, not #': they are defined in api.lisp, after this file
   (net.aserve:publish :path "/brickyard/api/prompt" :server server :function (gated 'prompt-handler))
   (net.aserve:publish :path "/brickyard/api/reference" :server server :function (gated 'reference-handler))
+  (net.aserve:publish :path "/brickyard/api/table" :server server :function (gated 'table-handler))
   (net.aserve:publish :path "/brickyard/export" :server server :function (gated #'export-handler))
   (net.aserve:publish :path "/brickyard/import" :server server
                       :function (gated #'import-handler :limit (getf *ldraw-limits* :bytes)))

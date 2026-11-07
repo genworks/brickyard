@@ -1,1 +1,1 @@
-("package" "specs" "parts" "assembly" "ldraw" "editor" "api")
+("package" "specs" "parts" "assembly" "ldraw" "physics" "table" "editor" "api")
