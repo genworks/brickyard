@@ -11,5 +11,6 @@
  ((:file "source/package") (:file "source/specs")
   (:file "source/parts") (:file "source/assembly")
   (:file "source/ldraw") (:file "source/physics")
-  (:file "source/table") (:file "source/editor")
+  (:file "source/table") (:file "source/pilot")
+  (:file "source/pybricks") (:file "source/editor")
   (:file "source/api")))

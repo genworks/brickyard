@@ -450,6 +450,7 @@ nil when there is none."
         (:form :id "table-panel" :hidden "hidden"
          (:textarea :id "program" :rows "6" :spellcheck "false" (cl-who:str *sample-program*))
          (:button :type "submit" :id "program-go" "Run program")
+         (:button :type "button" :id "program-python" "Pybricks")
          (:pre :id "program-log"))
         (when *agents*
           (cl-who:htm
@@ -477,7 +478,7 @@ nil when there is none."
          (:dt "R T E") (:dd "turn, tilt, roll a quarter")
          (:dt "[ ]") (:dd "swing 15 degrees about the pin or axle it hangs on (Alt: 5)")
          (:dt "Run") (:dd "turn what the motors drive; with no motor, what the selected gear, axle or wheel turns")
-         (:dt "Table") (:dd "stand the build on a table and run a program: (go 300) (turn 90) (arm -25) (power 0.5 0.2 2) (wait 1)")
+         (:dt "Table") (:dd "stand the build on a table and run a program in Pybricks' terms: (straight 300) (turn 90) (arc 200 :angle 45) (arm -25) (wait 1000); Pybricks writes it out for a real hub")
          (:dt "Shift") (:dd "with any of these: the part alone")
          (:dt "C") (:dd "copy on top")
          (:dt "Del") (:dd "remove")

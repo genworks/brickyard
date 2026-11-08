@@ -1,1 +1,1 @@
-("package" "specs" "parts" "assembly" "ldraw" "physics" "table" "editor" "api")
+("package" "specs" "parts" "assembly" "ldraw" "physics" "table" "pilot" "pybricks" "editor" "api")

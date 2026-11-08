@@ -470,6 +470,14 @@ what came of it: :steps :robot :heading :seconds :pieces :over :summary."
           :seconds (getf result :seconds) :pieces (getf result :pieces) :over (getf result :over)
           :summary (run-summary result))))
 
+(defun brickyard-api:pybricks-program (program)
+  "The text of a Pybricks program for a real hub that does what program
+does on the table: the same steps, with the current build's ports,
+motor directions, gears, wheel diameter and axle track."
+  (let ((steps (checked-program program))
+        (robot (with-api-build (assembly) (robot-of assembly))))
+    (pybricks-program robot steps :title (format nil "Brickyard build ~a" *api-build*))))
+
 (defun table-json (robot result open?)
   (let ((frames (getf result :frames)))
     (flet ((numbers (list) (map 'vector #'(lambda (x) (float x 1d0)) list)))
@@ -499,10 +507,12 @@ what came of it: :steps :robot :heading :seconds :pieces :over :summary."
          (robot (bt:with-lock-held (*builds-lock*)
                   (let ((assembly (find-build id)))
                     (if assembly (robot-of assembly) (error "No such build."))))))
-    (table-json robot (run-program robot program) open?)))
+    (if (equal action "python")
+        (json-object :ok t :python (pybricks-program robot program :title (format nil "Brickyard build ~a" id)))
+        (table-json robot (run-program robot program) open?))))
 
 (defun table-handler (req ent)
-  "POST b and action: open, or run with program."
+  "POST b and action: open, run or python, the last two with program."
   (let* ((params (net.aserve:form-urlencoded-to-query (gwl:request-body-text req)))
          (param #'(lambda (name) (cdr (assoc name params :test #'string=))))
          (result (handler-case (table-answer (funcall param "b") (funcall param "action") (funcall param "program"))

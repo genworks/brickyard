@@ -113,26 +113,49 @@ function of one thunk, and each of its prompts runs inside that.
 The Table button stands the build on a robot-competition table, a mat
 of 2362 by 1143 mm inside low walls, with balls and crates to push and
 rings to bring them to.  The layout and the mat are Brickyard's own.  A
-robot there runs a program and nobody steers it:
+robot there runs a program and nobody steers it.  The steps are
+[Pybricks](https://pybricks.com)' drive base and motor calls, with its
+units and signs, so the same program runs on the table here and on a
+real hub:
 
 ```lisp
-(go 500)              ; millimeters, by the wheels' count; negative is back
-(go 500 :speed 0.8)   ; a share of full speed, 0.5 unless it says
-(turn 90)             ; degrees to the left, by a gyroscope
-(power 0.5 0.2 2)     ; left and right power, for seconds
-(arm -25)             ; swing the arm, degrees, and hold it there
-(arm 40 :speed 0.5 :motor 9)   ; a share of full speed, and which motor
-(wait 1)
+(straight 500)             ; mm; negative goes back
+(turn 90)                  ; degrees; positive is clockwise
+(arc 300 :angle 90)        ; radius mm, positive to the right; or :distance mm
+(drive 200 -30 1500)       ; mm/s and deg/s, for milliseconds, then stop
+(settings :straight-speed 200 :straight-acceleration 400 :turn-rate 90 :turn-acceleration 300)
+(arm -25)                  ; degrees at the arm, and hold it there
+(arm 40 :speed 300 :motor 9)   ; deg/s, and which motor
+(wait 1000)                ; milliseconds
 ```
+
+The robot here drives as a Pybricks drive base does: each move follows
+a trapezoid of speed, the wheels' angles count the distance, the hub's
+gyroscope keeps the heading, and the settings start at Pybricks' own
+defaults for the motors (40% of top speed straight, a third of the top
+turn rate).
+
+The Pybricks button writes the program out as a Pybricks program to
+save and open in Pybricks Code: the left wheel motor on port A, the
+right on B, arm motors on C to F, each motor's direction worked out from
+which way it faces in the build, a gear train as `gears=`, and the
+build's wheel diameter and axle track.  It assumes the hub lies flat,
+buttons up, facing the way the robot drives.  None of this has yet been
+run on a real hub.
 
 A motor that turns no wheel on the mat turns an arm: whatever its shaft
 carries by an axle hole, and everything built on that.  An axle across
 the robot lifts with a positive angle an arm that points ahead, and an
-upright axle swings it to the left.  Arm robot on the page is a sample.
+upright axle swings it counterclockwise seen from above.  Arm robot on
+the page is a sample.
 
-`(brickyard-api:run-on-table '((:go 500) (:turn 90) (:arm -25)))` does the same
-from Lisp and answers where everything stopped.  The server runs the
-whole program and the page plays it back.
+`(brickyard-api:run-on-table '((:straight 500) (:turn 90) (:arm -25)))`
+does the same from Lisp and answers where everything stopped, and
+`(brickyard-api:pybricks-program '((:straight 500)))` answers the
+Pybricks program.  The server runs the whole program and the page plays
+it back.  `tests/run.lisp` checks the driving, the pieces and the
+program written out: load it after Brickyard and call
+`(brickyard::run-tests)`.
 
 The build drives as one rigid body in the plane of the mat
 (`source/physics.lisp`, `source/table.lisp`): mass and center come from

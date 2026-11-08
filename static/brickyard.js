@@ -222,6 +222,24 @@
     else openTable().catch(function (e) { say('The table did not open: ' + e); });
   });
 
+  // The same program as a Pybricks program for a real hub: shown, and
+  // offered as a file.
+  document.getElementById('program-python').addEventListener('click', function () {
+    tableCall({ action: 'python', program: programText.value })
+      .then(function (reply) {
+        if (!reply.ok) { say(reply.message); return; }
+        programLog.textContent = '';
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(new Blob([reply.python], { type: 'text/x-python' }));
+        link.download = 'brickyard-' + buildId + '.py';
+        link.textContent = 'Save as ' + link.download;
+        const code = document.createElement('pre');
+        code.textContent = reply.python;
+        programLog.append(link, code);
+      })
+      .catch(function (err) { say('The server did not answer: ' + err); });
+  });
+
   tablePanel.addEventListener('submit', function (e) {
     e.preventDefault();
     tableCall({ action: 'run', program: programText.value })

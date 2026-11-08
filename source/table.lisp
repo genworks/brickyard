@@ -15,14 +15,8 @@
 ;; printed on the mat and what stands on it are this file's own.
 ;;
 ;; A robot here runs a program it was given and nobody steers it, as at a
-;; competition:
-;;
-;;   ((:go 500) (:turn 90) (:go 300 :speed 0.3) (:wait 1) (:power 0.5 0.2 2))
-;;
-;; :go is millimeters by the wheels' count, :turn degrees to the left by
-;; a gyroscope, :power the two sides' power for some seconds; nothing
-;; about the table is known to the robot, so a wheel that slips or a wall
-;; in the way shows up as a robot that is not where its program thinks.
+;; competition; pilot.lisp has the programs and the run, pybricks.lisp
+;; writes a program out for a real hub.
 ;;
 ;; The build is one rigid body.  Its mass and its center come from its
 ;; parts; what it weighs on each wheel and skid from where they stand;
@@ -69,7 +63,9 @@
 
 (defparameter *plastic* 1.05d0 "Grams to the cubic centimeter.")
 
-(defparameter *free-speed* 17d0 "Radians a second: a motor at full power with nothing to turn.")
+(defparameter *free-speed* (* 1000 (/ pi 180))
+  "Radians a second: a motor at full power with nothing to turn, Pybricks'
+rated top speed for the SPIKE angular motors, 1000 deg/s.")
 
 (defparameter *stall-torque* 180000d0 "Kilogram square millimeters per square second: 0.18 N m, a motor held still.")
 
@@ -95,17 +91,17 @@
 
 (defparameter *program-limit* 200 "Integer. The most steps in a program.")
 
-(defparameter *sample-program* "(go 1560)
-(wait 1)
-(go -300)"
-  "String. What the page's program box starts with: two balls along the line, into the red ring.")
-
 (defstruct drive
   "A motor on the robot: id its part's, side -1 left, 1 right, 0 in the
-middle; rolled the millimeters its wheels have counted, angle how far it
-has turned, and parts the (id speed point axis) of what it turns."
+middle; rolled the millimeters its wheels have counted, and last what
+they had counted a tick ago; angle how far it has turned, and parts the
+(id speed point axis) of what it turns.  top is how fast its wheels' rims
+go at full power, mm/s.  For a real hub: ratio how fast its first wheel or
+arm turns against it, and clockwise whether Pybricks' Direction.CLOCKWISE
+makes positive drive forward, or swing an arm the positive way."
   id (side 0) (power 0d0 :type double-float) (rolled 0d0 :type double-float)
-  (angle 0d0 :type double-float) (wheels 0) parts)
+  (last 0d0 :type double-float) (angle 0d0 :type double-float) (wheels 0) parts
+  (top 1d0 :type double-float) (ratio 1) clockwise)
 
 (defstruct tread
   "Where the robot meets the mat, in the body's own frame.  With a radius
@@ -131,8 +127,9 @@ of mass from the pivot, and load the torque what it met put on it."
 (defstruct robot
   "A build ready for the table.  forward is the way it faces in its own
 frame; center x y and lift, in millimeters, say how the page places it.
-fixed is the shapes that do not move on it."
-  rigid treads drives arms fixed center lift forward)
+fixed is the shapes that do not move on it.  track and wheel-diameter are
+a drive base's, millimeters; track is nil without a wheel motor each side."
+  rigid treads drives arms fixed center lift forward track wheel-diameter)
 
 (defun part-grams (spec)
   (or (cdr (assoc (spec-type spec) *part-grams*))
@@ -222,7 +219,20 @@ would set a motor's polarity."
                  (rides (riding-groups specs survey speeds))
                  (first-wheel (find-if #'(lambda (e) (roller-line (nth (first e) specs))) entries))
                  (polarity (if (and first-wheel (minusp (second first-wheel))) -1 1))
-                 (drive (make-drive :id (spec-id (nth m specs)))))
+                 (drive (make-drive :id (spec-id (nth m specs))))
+                 ;; Pybricks sees a motor turn clockwise looking at its
+                 ;; shaft: about the shaft's way out of the motor, backwards
+                 (shaft (first (first (motor-seeds specs survey m))))
+                 (along (and shaft (second (turning-line (nth shaft specs)))))
+                 (out (connector-dir (find :axle-hole (world-connectors (nth m specs)) :key #'connector-kind)))
+                 (facing (if along (dot along out) 1)))
+            (cond (first-wheel
+                   (setf (drive-ratio drive) (abs (second first-wheel))
+                         (drive-clockwise drive) (plusp (* polarity facing))))
+                  (rides
+                   (let ((ratio (gethash (first (first rides)) speeds)))
+                     (setf (drive-ratio drive) (abs ratio)
+                           (drive-clockwise drive) (minusp (* ratio facing))))))
             (when (or first-wheel rides)
               (setf (drive-parts drive)
                     (mapcar #'(lambda (e)
@@ -331,7 +341,8 @@ built, for a part that moves.  Thin parts take a few larger balls."
                                                             (float (- y (second center)) 1d0)
                                                             (float (/ w 2) 1d0) (float (/ d 2) 1d0))))))
             (dolist (tread driven)
-              (incf (drive-wheels (tread-drive tread))))
+              (incf (drive-wheels (tread-drive tread)))
+              (setf (drive-top (tread-drive tread)) (* *free-speed* (tread-ratio tread) (tread-radius tread))))
             (dolist (drive drives)
               ;; which side of the way it faces its wheels stand on
               (let ((across (loop for tread in driven
@@ -343,7 +354,16 @@ built, for a part that moves.  Thin parts take a few larger balls."
                                                         :restitution 0.1d0 :shapes shapes)
                                      :treads treads :drives drives :arms arms :fixed shapes
                                      :center center :forward (list fx fy)
-                                     :lift (- (mm lowest)))))
+                                     :lift (- (mm lowest))
+                                     :wheel-diameter (* 2 (tread-radius (first driven))))))
+              ;; the drive base's track: from the left wheels' middle to the right's
+              (flet ((across (side)
+                       (let ((treads (remove side driven :key #'(lambda (tr) (drive-side (tread-drive tr)))
+                                                         :test-not #'eql)))
+                         (and treads (/ (reduce #'+ treads :key #'(lambda (tr) (- (* (tread-x tr) fy) (* (tread-y tr) fx))))
+                                        (length treads))))))
+                (let ((left (across -1)) (right (across 1)))
+                  (setf (robot-track robot) (and left right (- right left)))))
               (settle-rigid! (robot-rigid robot))
               (incf (rigid-reach (robot-rigid robot)) (reduce #'max arms :key #'arm-span :initial-value 0d0))
               (pose-arms! robot)
@@ -510,154 +530,15 @@ give, as for a wheel."
                   (resist fx fy rolling (* *rolling* (tread-load tread))))))))))
 
 ;;
-;; Programs
+;; Helpers
 ;;
-
-(defun check-number (value low high what)
-  (unless (and (realp value) (<= low value high))
-    (error "~a must be a number from ~a to ~a, not ~s." what low high value))
-  (float value 1d0))
-
-(defun checked-step (step)
-  "Step in its full form, or an error saying what is wrong with it."
-  (unless (and (consp step) (keywordp (first step)))
-    (error "A step is a list like (:go 300), not ~s." step))
-  (destructuring-bind (name . arguments) step
-    (flet ((arguments (low high)
-             (unless (<= low (length arguments) high)
-               (error "~s has the wrong number of arguments." step)))
-           (speed ()
-             (let ((keys (rest arguments)))
-               (unless (or (null keys) (and (= (length keys) 2) (eql (first keys) :speed)))
-                 (error "The only option of ~s is :speed." name))
-               (check-number (getf keys :speed 0.5d0) 0.05d0 1 ":speed"))))
-      (case name
-        (:go (arguments 1 3)
-         (list :go (check-number (first arguments) -3000 3000 "A distance") (speed)))
-        (:turn (arguments 1 3)
-         (list :turn (check-number (first arguments) -1080 1080 "A turn") (speed)))
-        (:power (arguments 3 3)
-         (list :power (check-number (first arguments) -1 1 "A power")
-               (check-number (second arguments) -1 1 "A power")
-               (check-number (third arguments) 0 150 "Seconds")))
-        (:wait (arguments 1 1)
-         (list :wait (check-number (first arguments) 0 150 "Seconds")))
-        (:arm (arguments 1 5)
-         (let ((keys (rest arguments)))
-           (unless (and (evenp (length keys))
-                        (loop for (key) on keys by #'cddr always (member key '(:speed :motor))))
-             (error "The options of :arm are :speed and :motor."))
-           (list :arm (check-number (first arguments) -720 720 "An arm's angle")
-                 (check-number (getf keys :speed 0.2d0) 0.05d0 1 ":speed")
-                 (getf keys :motor))))
-        (t (error "~s is not a step: the steps are :go :turn :power :wait and :arm." name))))))
-
-(defun checked-program (program)
-  (unless (and (listp program) (<= (length program) *program-limit*))
-    (error "A program is a list of at most ~a steps." *program-limit*))
-  (mapcar #'checked-step program))
-
-(defun read-program (text)
-  "The program in text, whose steps may be written (go 300) or (:go 300)."
-  (let ((*package* (find-package :keyword))
-        (*read-eval* nil)
-        (end (gensym)))
-    (with-input-from-string (in text)
-      (loop for form = (handler-case (read in nil end)
-                         (end-of-file () (error "A step is missing a closing parenthesis."))
-                         (reader-error () (error "That program cannot be read.")))
-            until (eq form end)
-            collect form))))
 
 (defun angle-difference (a b)
   "a less b, the short way round, in radians."
   (let ((d (mod (- a b) (* 2 pi))))
     (if (> d pi) (- d (* 2 pi)) d)))
 
-(defun rolled (robot)
-  "The millimeters its wheels have counted, on the average."
-  (let ((drives (robot-drives-with-wheels robot)))
-    (/ (reduce #'+ drives :key #'drive-rolled) (length drives))))
-
-(defun robot-drives-with-wheels (robot)
-  (remove 0 (robot-drives robot) :key #'drive-wheels))
-
-(defun set-power! (robot left right)
-  (dolist (drive (robot-drives-with-wheels robot))
-    (setf (drive-power drive)
-          (ecase (drive-side drive)
-            (-1 left) (1 right) (0 (/ (+ left right) 2))))))
-
 (defun within (x limit) (max (- limit) (min limit x)))
-
-(defun step-controller (step robot state)
-  "A function of dt that drives the robot through step, answering nil
-until it is done, then :done, or :stalled when it never gets there.
-state is a list of the heading the robot means to hold."
-  (let ((rigid (robot-rigid robot))
-        (elapsed 0d0))
-    (flet ((hold-error () (angle-difference (first state) (rigid-angle rigid))))
-      (ecase (first step)
-        (:go
-         (destructuring-bind (distance speed) (rest step)
-           (let ((start (rolled robot))
-                 (limit (+ 2d0 (/ (* 3 (abs distance)) (* speed *free-speed* 20d0)))))
-             #'(lambda (dt)
-                 (incf elapsed dt)
-                 (let* ((left (- distance (- (rolled robot) start)))
-                        (toward (signum (if (zerop distance) 1d0 distance)))
-                        (power (* toward speed (max 0.12d0 (min 1d0 (/ (abs left) 80d0)))))
-                        (steer (within (* 1.5d0 (hold-error)) 0.3d0)))
-                   (cond ((<= (* toward left) 0.5d0) (set-power! robot 0d0 0d0) :done)
-                         ((> elapsed limit) (set-power! robot 0d0 0d0) :stalled)
-                         (t (set-power! robot (- power steer) (+ power steer)) nil)))))))
-        (:turn
-         (destructuring-bind (degrees speed) (rest step)
-           (unless (and (find -1 (robot-drives robot) :key #'drive-side)
-                        (find 1 (robot-drives robot) :key #'drive-side))
-             (error "To turn it needs a motor on each side."))
-           (setf (first state) (+ (first state) (* degrees (/ pi 180))))
-           (let ((limit (+ 2d0 (/ (abs degrees) (* speed 30d0)))))
-             #'(lambda (dt)
-                 (incf elapsed dt)
-                 (let* ((e (hold-error))
-                        (power (* (signum e) (max 0.08d0 (min speed (abs (* 1.5d0 e)))))))
-                   (cond ((< (abs e) 0.012d0) (set-power! robot 0d0 0d0) :done)
-                         ((> elapsed limit) (set-power! robot 0d0 0d0) :stalled)
-                         (t (set-power! robot (- power) power) nil)))))))
-        (:power
-         (destructuring-bind (left right seconds) (rest step)
-           #'(lambda (dt)
-               (incf elapsed dt)
-               (set-power! robot left right)
-               (when (>= elapsed seconds)
-                 ;; what it did to the heading stands
-                 (setf (first state) (rigid-angle rigid))
-                 (set-power! robot 0d0 0d0)
-                 :done))))
-        (:wait
-         (destructuring-bind (seconds) (rest step)
-           #'(lambda (dt)
-               (incf elapsed dt)
-               (set-power! robot 0d0 0d0)
-               (when (>= elapsed seconds) :done))))
-        (:arm
-         (destructuring-bind (degrees speed motor) (rest step)
-           (let ((arm (find-if #'(lambda (a) (or (null motor) (eql (drive-id (arm-drive a)) motor)))
-                               (robot-arms robot))))
-             (unless arm
-               (error (if motor "Motor ~a turns no arm." "It has no motor turning an arm.") motor))
-             (incf (arm-target arm) (* degrees (/ pi 180)))
-             (setf (arm-speed arm) speed)
-             (let ((limit (+ 2d0 (/ (* 3 (abs (* degrees (/ pi 180))))
-                                    (* speed *free-speed* (abs (arm-ratio arm)))))))
-               #'(lambda (dt)
-                   (incf elapsed dt)
-                   (cond ((< (abs (- (arm-target arm) (arm-angle arm))) 0.02d0) :done)
-                         ((> elapsed limit)
-                          ;; it stays where it got to, not straining at the goal
-                          (setf (arm-target arm) (arm-angle arm))
-                          :stalled)))))))))))
 
 ;;
 ;; The table set up, and a run on it
@@ -735,90 +616,6 @@ angle, each drive's angle, each piece's center and angle."
   (every #'(lambda (r) (and (< (+ (abs (rigid-vx r)) (abs (rigid-vy r))) 1d0)
                             (< (abs (rigid-spin r)) 0.01d0)))
          rigids))
-
-(defun run-program (robot program &key (table *table*))
-  "Run program, already checked, on the table.  A plist: :steps, each with
-how it ended and when; :robot where it stopped; :pieces where they
-stopped; :frames for the page."
-  (let* ((state (list (place-robot! robot table)))
-         (rigid (robot-rigid robot))
-         (pieces (table-pieces table))
-         (rigids (append (list rigid) pieces (table-walls table)
-                         (mapcar #'(lambda (f) (apply #'fixed-rigid f)) (getf table :fixed))))
-         (treads (robot-treads robot))
-         (seconds 0d0)
-         (tick 0)
-         (controller nil)
-         (left program)
-         (current nil)
-         (frames nil)
-         (ended nil)
-         (quiet 0d0))
-    (when (touches-of (list* rigid (nthcdr (1+ (length pieces)) rigids)))
-      (error "It does not fit on the table's start."))
-    (loop
-      (when (and (null controller) left)
-        (setf current (pop left)
-              controller (step-controller current robot state)))
-      (when controller
-        (let ((outcome (funcall controller *tick*)))
-          (when outcome
-            (push (list current outcome (/ (round (* 10 seconds)) 10d0)) ended)
-            (setf controller nil))))
-      (dolist (tread treads) (roll-tread! rigid tread *tick*))
-      (dolist (arm (robot-arms robot)) (swing-arm! arm robot *tick*))
-      (when (robot-arms robot) (pose-arms! robot))
-      (feel-touches! robot (step-rigids! rigids *tick*) *tick*)
-      (incf seconds *tick*)
-      (when (zerop (mod tick *frame-ticks*))
-        (push (frame-of seconds robot pieces) frames))
-      (incf tick)
-      ;; a program done, the table comes to rest
-      (when (and (null controller) (null left))
-        (incf quiet *tick*)
-        (when (or (> quiet 4d0) (and (> quiet 0.3d0) (still-p (cons rigid pieces))))
-          (return)))
-      (when (>= seconds *match-seconds*)
-        (return)))
-    (push (frame-of seconds robot pieces) frames)
-    (list :steps (reverse ended)
-          :over (and (or controller left) t)
-          :seconds (/ (round (* 10 seconds)) 10d0)
-          :robot (list (round (rigid-x rigid)) (round (rigid-y rigid)))
-          :heading (robot-heading robot)
-          :pieces (mapcar #'(lambda (p)
-                              (list :piece (first (rigid-name p)) :index (second (rigid-name p))
-                                    :at (list (round (rigid-x p)) (round (rigid-y p)))
-                                    :ring (ring-of p table)))
-                          pieces)
-          :frames (coerce (reverse frames) 'vector))))
-
-(defun robot-heading (robot)
-  "Whole degrees the robot faces, 0 along the table, 90 across it."
-  (let ((forward (robot-forward robot)))
-    (round (* (/ 180 pi)
-              (angle-difference (+ (rigid-angle (robot-rigid robot)) (atan (second forward) (first forward)))
-                                0)))))
-
-(defun step-line (entry)
-  "What became of a step of a run, in words."
-  (destructuring-bind (step outcome seconds) entry
-    (format nil "~(~a~)~{ ~a~}: ~(~a~) at ~,1f s" (first step)
-            (ecase (first step)
-              ((:go :turn :wait :arm) (list (round (second step))))
-              (:power (list (second step) (third step) (fourth step))))
-            outcome seconds)))
-
-(defun run-summary (result)
-  "List of lines: where a run left the robot and the pieces."
-  (let ((rung (remove nil (getf result :pieces) :key #'(lambda (p) (getf p :ring)))))
-    (append (list (format nil "Stopped at ~{~a, ~a~} facing ~a after ~,1f s."
-                          (getf result :robot) (getf result :heading) (getf result :seconds)))
-            (mapcar #'(lambda (p)
-                        (format nil "~:(~a~) ~a is in the ~(~a~) ring."
-                                (getf p :piece) (getf p :index) (getf p :ring)))
-                    rung)
-            (when (getf result :over) (list "The match ended first.")))))
 
 ;;
 ;; The table as the page draws it
