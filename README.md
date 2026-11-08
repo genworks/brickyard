@@ -241,7 +241,9 @@ close the gate to a roster kept on the server:
 
 ```lisp
 (brickyard:private-beta "/path/to/brickyard-invites.sexp" "https://example.com")
-(invite-gate:mint-invite! (brickyard:gate) "A tester")  ; => token, link to hand out
+(brickyard:mint-invite! "A tester")   ; => token, link to hand out
+(brickyard:invites-report)              ; who has one, and how often it was used
+(brickyard:revoke-invite! "token")
 ```
 
 The link sets a cookie and opens the editor; every page and call under

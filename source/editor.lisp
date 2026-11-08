@@ -597,7 +597,9 @@ an empty group the parts go into."
 ;; static files (the page's own script and style) stay open.
 ;;
 ;;   (brickyard:private-beta "/path/to/brickyard-invites.sexp" "https://example.com")
-;;   (invite-gate:mint-invite! (brickyard:gate) "Name")  ; => token, link
+;;   (brickyard:mint-invite! "Name")  ; => token, link
+;;   (brickyard:invites-report)
+;;   (brickyard:revoke-invite! "token")
 ;;
 
 (defvar *gate* nil "The invite gate, made on first use when invite-gate is loaded.")
@@ -713,6 +715,14 @@ GET with no body; its own refusal would keep alive and read one."
                                            (subseq (net.uri:uri-path (net.aserve:request-uri req))
                                                    (length prefix)))
                          (refuse-visitor req ent)))))))
+
+(defun live-gate ()
+  (or (gate) (error "Load Gendl's invite-gate first.")))
+
+;; as Stratum and Tala have them
+(defun mint-invite! (name) (uiop:symbol-call :invite-gate :mint-invite! (live-gate) name))
+(defun revoke-invite! (token) (uiop:symbol-call :invite-gate :revoke-invite! (live-gate) token))
+(defun invites-report () (uiop:symbol-call :invite-gate :invites-report (live-gate)))
 
 (defun private-beta (invites-file public-base)
   "Close the gate to all but the invites in invites-file, whose links start with public-base."
