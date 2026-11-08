@@ -108,6 +108,24 @@ answers only for names it offers, and the browser remembers the choice.
 A model that shares a GPU with something else can take `:turn`, a
 function of one thunk, and each of its prompts runs inside that.
 
+## SPIKE Prime parts
+
+The SPIKE Prime row of the parts bin has LEGO's own: the hub, the large
+and medium angular motors, the color, distance and force sensors, and the
+56 mm wheel.  Their sizes and their pin and axle holes are read from the
+LDraw library's files (library.ldraw.org, CC BY 4.0), so they pin
+together as the real parts do and export to LDraw as those parts; they
+are drawn here as boxes.  On the table each motor turns at LEGO's figures
+for it (175 and 185 rpm with nothing to turn, 25 and 18 N cm held still,
+at 7.2 V), and the hub weighs 63 g as LEGO gives it plus an estimated 120
+g of battery; the other masses are estimates or retail listings.  SPIKE
+robot on the page is a drive base built of them: two large motors pinned
+to the hub's sides, a wheel on an axle through each motor's crosshole, a
+color sensor pinned under the front 16 mm off the mat, LEGO's best
+distance for it, and two axles for skids.  Its program written out names
+its 56 mm wheels and 136 mm track, and the hub's top_side when the hub is
+not mounted buttons up.  A motor's rotating disc is taken to stand still.
+
 ## The table
 
 The Table button stands the build on a robot-competition table, a mat

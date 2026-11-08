@@ -454,6 +454,41 @@ pin/pin/pin one with four pins standing up and down.")
            :display-controls (list :color :black))))
 
 
+(define-object spike-part (part-mixin)
+  :documentation (:description "A SPIKE Prime part, drawn as the box it fills, its holes where the LDraw library has them; a sensor's eye or button dark on its -y face.")
+
+  :computed-slots
+  ((extent (local-extent (the spec)))
+   (middle (mapcar #'(lambda (a b) (/ (+ a b) 2)) (first (the extent)) (second (the extent))))
+   (sides (mapcar #'(lambda (a b) (- (mm (- b a)) 0.2)) (first (the extent)) (second (the extent))))
+   (sensor? (member (the part-type) '(:spike-color-sensor :spike-distance-sensor :spike-force-sensor))))
+
+  :objects
+  ((body :type 'box
+         :width (first (the sides)) :length (second (the sides)) :height (third (the sides))
+         :center (the (local-point (the middle)))
+         :display-controls (the display-controls))
+   (face :type 'box
+         :sequence (:size (if (the sensor?) 1 0))
+         :width (* 0.7 (first (the sides))) :length 0.4 :height (* 0.7 (third (the sides)))
+         :center (the (local-point (list (first (the middle)) (second (first (the extent))) (third (the middle))) :up 0))
+         :display-controls (list :color :grey-slate-dark))))
+
+
+(define-object spike-wheel (part-mixin)
+  :documentation (:description "The SPIKE Prime 56 mm wheel: a tire 14 mm wide on a hub, turning on an axle along its own :rear.")
+
+  :objects
+  ((tire :type 'cylinder
+         :radius 27.9 :length 13.9
+         :orientation (alignment :rear (the (local-direction '(0 1 0))))
+         :display-controls (list :color :black))
+   (hub :type 'cylinder
+        :radius 20.0 :length 14.2
+        :orientation (alignment :rear (the (local-direction '(0 1 0))))
+        :display-controls (the display-controls))))
+
+
 (defun part-class (spec)
   (ecase (spec-type spec)
     ((:brick :plate :tile :technic-brick) 'brick)
@@ -476,6 +511,10 @@ pin/pin/pin one with four pins standing up and down.")
     (:color-sensor 'color-sensor)
     (:distance-sensor 'distance-sensor)
     (:force-sensor 'force-sensor)
+    (:spike-wheel 'spike-wheel)
+    ((:spike-hub :spike-large-motor :spike-medium-motor :spike-color-sensor :spike-distance-sensor
+      :spike-force-sensor)
+     'spike-part)
     ((:bent-beam :cheese-slope :split-cross-block :triple-cross-block :axle-hub :hole-axle :stud-axle
       :axle-connector :twin-cross-block :axle-beam :h-beam :cross-pin :pin-axle)
      'boxed-part)))

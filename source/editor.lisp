@@ -57,7 +57,9 @@ run inside.  Empty until prompting opens the box (api.lisp).")
      (:axle-hub nil) (:axle-connector nil) (:cross-pin nil) (:pin-axle nil))
     ("Robot" (:wheel (3 1)) (:wheel (4 2)) (:wheel (5 2)) (:wheel (7 3)) (:rim nil) (:tyre nil)
      (:motor nil) (:controller nil))
-    ("Sensors" (:color-sensor nil) (:distance-sensor nil) (:force-sensor nil)))
+    ("Sensors" (:color-sensor nil) (:distance-sensor nil) (:force-sensor nil))
+    ("SPIKE Prime" (:spike-hub nil) (:spike-large-motor nil) (:spike-medium-motor nil)
+     (:spike-color-sensor nil) (:spike-distance-sensor nil) (:spike-force-sensor nil) (:spike-wheel nil)))
   "List of (heading (type size) ...) for the page's parts bin.")
 
 (defparameter *colors*
@@ -169,6 +171,10 @@ nil when there is none."
     (:h-beam "H-beam 5x3")
     (:cross-pin "Pin with pin hole")
     (:pin-axle "Axle 2 with pin")
+    (:spike-hub "SPIKE Prime hub") (:spike-large-motor "SPIKE large motor")
+    (:spike-medium-motor "SPIKE medium motor") (:spike-color-sensor "SPIKE color sensor")
+    (:spike-distance-sensor "SPIKE distance sensor") (:spike-force-sensor "SPIKE force sensor")
+    (:spike-wheel "SPIKE wheel 56")
     (t (format nil "~:(~a~)~@[ ~a~]"
                (substitute #\Space #\- (string type))
                (case type
@@ -198,6 +204,9 @@ nil when there is none."
     (:cross-block (format nil "Cross 1x~a" (first size)))
     (:motor "Motor") (:controller "Controller")
     (:color-sensor "Color sensor") (:distance-sensor "Distance sensor") (:force-sensor "Force sensor")
+    (:spike-hub "Hub") (:spike-large-motor "Large motor") (:spike-medium-motor "Medium motor")
+    (:spike-color-sensor "Color") (:spike-distance-sensor "Distance") (:spike-force-sensor "Force")
+    (:spike-wheel "Wheel 56")
     (t (format nil "~:[~;~:*~a ~]~{~a~^x~}"
                (case type (:beam "Beam") (:axle "Axle") (:technic-brick "Tech") (:wheel "Wheel") (:gear "Gear"))
                size))))
@@ -419,6 +428,7 @@ nil when there is none."
        (:a :href "/brickyard?new=robot" "Robot build")
        (:a :href "/brickyard?new=arm" "Arm robot")
        (:a :href "/brickyard?new=sensors" "Sensor robot")
+       (:a :href "/brickyard?new=spike" "SPIKE robot")
        (:a :href "/brickyard?new=gearbox" "Gearbox")
        (:a :href "/brickyard?new=empty" "Empty build")
        (:a :href (format nil "/brickyard/export?b=~a" build-id) :id "export" "Export LDraw")
@@ -526,6 +536,7 @@ an empty group the parts go into."
                                                                 ((string= new "robot") *robot-build*)
                                                                 ((string= new "arm") *arm-build*)
                                                                 ((string= new "sensors") *sensor-build*)
+                                                                ((string= new "spike") *spike-build*)
                                                                 ((string= new "gearbox") *gearbox-build*)
                                                                 (t *sample-build*)))))))
           ((and id (bt:with-lock-held (*builds-lock*) (find-build id)))

@@ -159,9 +159,22 @@ program, the device a drive or a sensor."
                      (when (eql (first step) :repeat)
                        (program-text (cddr step) (concatenate 'string indent "  "))))))
 
+(defun hub-top-side (robot)
+  "Pybricks' Axis through the top of the SPIKE hub, in the robot's frame
+(X ahead, Y to the left, Z up), or nil when it lies flat, buttons up."
+  (let ((up (robot-hub-up robot)))
+    (when up
+      (destructuring-bind (fx fy) (robot-forward robot)
+        (let* ((along (list (cons "Axis.X" (list fx fy 0)) (cons "Axis.Y" (list (- fy) fx 0)) (cons "Axis.Z" (list 0 0 1))))
+               (best (first (sort (copy-list along) #'> :key #'(lambda (a) (abs (dot (cdr a) up))))))
+               (sign (dot (cdr best) up)))
+          (unless (and (string= (car best) "Axis.Z") (plusp sign))
+            (format nil "~:[-~;~]~a" (plusp sign) (car best))))))))
+
 (defun pybricks-program (robot program &key (title "A Brickyard program"))
   "Program, already checked, for robot, as the text of a Pybricks program."
-  (let* ((names (pybricks-names robot))
+  (let* ((top-side (hub-top-side robot))
+         (names (pybricks-names robot))
          (classes (remove-duplicates (mapcar #'(lambda (s) (second (assoc (sensor-kind s) *sensor-classes*)))
                                              (robot-sensors robot))
                                      :test #'string=)))
@@ -171,14 +184,16 @@ program, the device a drive or a sensor."
       (format s "~{~a~%~}" (program-text program))
       (format s "#~%# Ports: ~{~a~^, ~}.~%"
               (mapcar #'(lambda (e) (format nil "~a on ~a" (second e) (third e))) names))
-      (format s "# The hub lies flat, buttons up, facing the way the robot drives.~%~%")
+      (format s "~:[# The hub lies flat, buttons up.~;# The hub's buttons face ~:*~a; which way its USB port faces is for you to give as front_side.~]~%~%"
+              (and top-side (substitute #\Space #\. top-side)))
       (format s "from pybricks.hubs import PrimeHub~%")
-      (format s "from pybricks.parameters import ~:[~;Color, ~]Direction, Port~%" (program-colors-p program))
+      (format s "from pybricks.parameters import ~:[~;Axis, ~]~:[~;Color, ~]Direction, Port~%"
+              top-side (program-colors-p program))
       (format s "from pybricks.pupdevices import ~{~a~^, ~}~%"
               (cons "Motor" (sort (copy-list classes) #'string<)))
       (format s "from pybricks.robotics import DriveBase~%")
       (format s "from pybricks.tools import wait~%~%")
-      (format s "hub = PrimeHub()~%")
+      (format s "hub = PrimeHub(~@[top_side=~a~])~%" top-side)
       (dolist (entry names)
         (destructuring-bind (device variable port) entry
           (format s "~a~%"

@@ -53,6 +53,28 @@ swings a long beam out in front, up over what is on the mat or down to sweep it.
 looking ahead, a color sensor under the plate looking down, and a force
 sensor's button out in front.")
 
+(defparameter *spike-build*
+  '((:type :spike-hub :at (0 0 0))
+    (:type :spike-large-motor :at (120 -40 -30) :up :left :rear :rear)
+    (:type :spike-large-motor :at (-120 -40 -30) :up :right :rear :rear)
+    (:type :pin :size (3) :at (80 80 10) :rear :right)
+    (:type :pin :size (3) :at (80 -40 10) :rear :right)
+    (:type :pin :size (3) :at (-80 80 10) :rear :right)
+    (:type :pin :size (3) :at (-80 -40 10) :rear :right)
+    (:type :axle :size (4) :at (170 -40 -30) :rear :right)
+    (:type :axle :size (4) :at (-170 -40 -30) :rear :right)
+    (:type :spike-wheel :at (170 -40 -30) :rear :right)
+    (:type :spike-wheel :at (-170 -40 -30) :rear :right)
+    (:type :spike-color-sensor :at (0 100 -10) :up :front :rear :top)
+    (:type :pin :at (20 100 0) :up :right :rear :top)
+    (:type :pin :at (-20 100 0) :up :right :rear :top)
+    (:type :axle :size (6) :at (60 100 -40) :up :right :rear :top)
+    (:type :axle :size (6) :at (-60 100 -40) :up :right :rear :top))
+  "List of specs. A SPIKE Prime drive base: the hub flat, a large motor
+pinned to each side with two 3-long pins, a 56 mm wheel on an axle through
+each motor's crosshole, a color sensor pinned under the front looking down
+from 16 mm, and two axles standing down from the front as skids.")
+
 (defparameter *gearbox-build*
   '((:type :technic-brick :size (8) :at (-30 0 0))
     (:type :technic-brick :size (8) :at (30 0 0))

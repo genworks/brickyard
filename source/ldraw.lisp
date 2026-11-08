@@ -89,7 +89,10 @@ through along Y, ours along :rear with its holes through along :right.")
     (:axle-beam (nil . "60483"))
     (:h-beam (nil . "14720"))
     (:cross-pin (nil . "15100"))
-    (:pin-axle (nil . "18651")))
+    (:pin-axle (nil . "18651"))
+    (:spike-hub (nil . "45601")) (:spike-large-motor (nil . "54675")) (:spike-medium-motor (nil . "54696"))
+    (:spike-color-sensor (nil . "37308")) (:spike-distance-sensor (nil . "37316"))
+    (:spike-force-sensor (nil . "37312")) (:spike-wheel (nil . "39367")))
   "Per type, an alist from size key to official part number.  The brick
 family's key is the two plan sizes, smaller first; the L-beam's its two
 arms; a part of one size has nil.")
@@ -113,7 +116,10 @@ blocks and the L-beam, whose Brickyard frames were drawn up from theirs.")
     (:stop-axle ,*frame-across* (0 0 0)) (:cheese-slope ,*frame-across* (0 0 0))
     ,@(mapcar #'(lambda (type) (list type *frame-same* '(0 0 0)))
               '(:bent-beam :split-cross-block :triple-cross-block :twin-cross-block :axle-hub :hole-axle
-                :stud-axle :axle-connector :axle-beam :h-beam :cross-pin :pin-axle)))
+                :stud-axle :axle-connector :axle-beam :h-beam :cross-pin :pin-axle
+                ;; the SPIKE parts' frames were read from the library's
+                :spike-hub :spike-large-motor :spike-medium-motor :spike-color-sensor
+                :spike-distance-sensor :spike-force-sensor :spike-wheel)))
   "Per type outside the brick family, (frame offset) of its library parts,
 read from the library files: pins and axle-pins lie along X from their
 collar, the bush and gears turn about Z, beams hold their holes along Y.")
@@ -122,7 +128,8 @@ collar, the bush and gears turn about Z, beams hold their holes along Y.")
   "The key a part of this type and size has in *ldraw-parts*."
   (case type
     ((:half-pin :bush :round-tile :pin-joiner :stop-pin :hole-pin :pin-block :axle-block :t-beam
-      :round-plate :rim :tyre)
+      :round-plate :rim :tyre :spike-hub :spike-large-motor :spike-medium-motor :spike-color-sensor
+      :spike-distance-sensor :spike-force-sensor :spike-wheel)
      nil)
     (:l-beam size)
     (:technic-brick (second size))

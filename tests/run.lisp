@@ -195,6 +195,45 @@
                     "while not (distance_sensor.distance() < 200):"))
       (check (format nil "Python: ~a" line) (search line text) text))))
 
+(defun test-spike ()
+  (let ((id (bt:with-lock-held (*builds-lock*) (make-build :specs *spike-build*))))
+    (unwind-protect
+         (bt:with-lock-held (*builds-lock*)
+           (let ((assembly (find-build id)))
+             (check "the SPIKE robot holds together: nothing loose, nothing overlapping"
+                    (and (null (the-object assembly loose)) (null (the-object assembly collisions))
+                         (= 18 (length (the-object assembly connections))))
+                    (list (the-object assembly loose) (the-object assembly collisions)))
+             (let ((text (to-ldraw assembly)))
+               (check "it exports as the library's SPIKE parts"
+                      (every #'(lambda (n) (search n text)) '("45601.dat" "54675.dat" "39367.dat" "37308.dat"))))))
+      (ignore-errors (delete-file (build-file id)))
+      (remhash id *builds*)))
+  (let ((robot (test-robot *spike-build*)))
+    (check "its wheels are 56 mm, 136 apart, its color sensor 16.4 mm up"
+           (and (= (robot-wheel-diameter robot) 56) (= (robot-track robot) 136)
+                (< (abs (- (sensor-z (first (robot-sensors robot))) 16.4)) 0.01))
+           (list (robot-wheel-diameter robot) (robot-track robot) (sensor-z (first (robot-sensors robot)))))
+    (check "a large motor turns 175 rpm with nothing to turn, by LEGO's sheet"
+           (< (abs (- (drive-free-speed (first (robot-drives robot))) (* 175 2 pi 1/60))) 1d-6))
+    (setf (robot-hub-up robot) '(1 0 0))
+    (check "a hub on its side tells Pybricks its top_side" (equal (hub-top-side robot) "-Axis.Y")
+           (hub-top-side robot)))
+  (destructuring-bind (x y) (getf (drive-test '((:straight 500)) :specs *spike-build*) :robot)
+    (check "the SPIKE robot goes 500 when told, its skids dragging" (and (near x 690 3) (near y 571 2)) (list x y)))
+  (let* ((robot (test-robot *spike-build*))
+         (result (run-program robot (checked-program (read-program "(straight 300) (follow-line :until (> (driven) 1200) :speed 200)"))
+                              :table (bare-table))))
+    (multiple-value-bind (x y) (sensor-place robot (first (robot-sensors robot)))
+      (declare (ignore x))
+      (check "its sensor, ahead of its wheels, holds the line's edge at 200 mm/s"
+             (and (<= 576 y 586) (> (first (getf result :robot)) 1300)) (list (getf result :robot) y))))
+  (let ((text (pybricks-program (test-robot *spike-build*) (checked-program '((:straight 300))))))
+    (dolist (line '("hub = PrimeHub()"
+                    "color_sensor = ColorSensor(Port.C)"
+                    "drive_base = DriveBase(left_motor, right_motor, wheel_diameter=56, axle_track=136)"))
+      (check (format nil "Python: ~a" line) (search line text) text))))
+
 (defun fingerprint ()
   "Where a long run leaves everything, for comparing one Lisp with another."
   (let ((result (run-program (test-robot *arm-build*)
@@ -210,6 +249,7 @@
   (test-refusals)
   (test-pybricks)
   (test-sensors)
+  (test-spike)
   (format t "~&fingerprint ~s~%" (fingerprint))
   (let ((failed (count nil *checks* :key #'second)))
     (format t "~&~a passed, ~a failed~%" (- (length *checks*) failed) failed)

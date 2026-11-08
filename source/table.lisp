@@ -56,7 +56,12 @@
   "List of (kind properties): what can be pushed about.  Drag is what the floor takes off, mm/s/s.")
 
 (defparameter *part-grams* '((:motor . 60) (:controller . 180) (:color-sensor . 15)
-                              (:distance-sensor . 20) (:force-sensor . 15))
+                              (:distance-sensor . 20) (:force-sensor . 15)
+                              ;; the hub 63 g by LEGO's sheet, with an estimated 120 g battery;
+                              ;; the motors as listed for sale; the sensors and wheel estimated
+                              (:spike-hub . 183) (:spike-large-motor . 76) (:spike-medium-motor . 54)
+                              (:spike-color-sensor . 15) (:spike-distance-sensor . 25)
+                              (:spike-force-sensor . 15) (:spike-wheel . 25))
   "List of (type . grams). A typical part of that type, for the parts that are not plastic.")
 
 (defparameter *hollow* 0.45d0
@@ -69,6 +74,21 @@
 rated top speed for the SPIKE angular motors, 1000 deg/s.")
 
 (defparameter *stall-torque* 180000d0 "Kilogram square millimeters per square second: 0.18 N m, a motor held still.")
+
+(defparameter *motor-figures*
+  '((:motor 1000 0.18)
+    ;; LEGO Education's SPIKE Prime technical specifications, at 7.2 V:
+    ;; no load 175 and 185 rpm, stall 25 and 18 N cm
+    (:spike-large-motor 1050 0.25)
+    (:spike-medium-motor 1110 0.18))
+  "List of (type deg/s N-m): each motor's speed with nothing to turn and its torque held still.")
+
+(defun motor-free-speed (type)
+  (* (or (second (assoc type *motor-figures*)) 1000) (/ pi 180)))
+
+(defun motor-stall (type)
+  "The motor's stall torque in kilogram square millimeters per square second."
+  (* 1d6 (or (third (assoc type *motor-figures*)) 0.18d0)))
 
 (defparameter *tire-grip* 0.8d0 "A tire's coefficient of friction on the mat.")
 
@@ -102,7 +122,8 @@ arm turns against it, and clockwise whether Pybricks' Direction.CLOCKWISE
 makes positive drive forward, or swing an arm the positive way."
   id (side 0) (power 0d0 :type double-float) (rolled 0d0 :type double-float)
   (last 0d0 :type double-float) (angle 0d0 :type double-float) (wheels 0) parts
-  (top 1d0 :type double-float) (ratio 1) clockwise)
+  (top 1d0 :type double-float) (ratio 1) clockwise
+  (free-speed *free-speed* :type double-float) (stall *stall-torque* :type double-float))
 
 (defstruct tread
   "Where the robot meets the mat, in the body's own frame.  With a radius
@@ -111,7 +132,9 @@ times the motor's speed; with no radius it slides."
   (x 0d0 :type double-float) (y 0d0 :type double-float)
   (fx 0d0 :type double-float) (fy 0d0 :type double-float)
   radius drive (ratio 1d0 :type double-float)
-  (grip 0d0 :type double-float) (load 0d0 :type double-float))
+  (grip 0d0 :type double-float) (load 0d0 :type double-float)
+  ;; the rim's speed when the wheel slips, nil while it grips
+  (spin nil))
 
 (defstruct arm
   "What a motor swings on the robot.  point is its pivot, x y from the
@@ -136,20 +159,28 @@ dy dz the way it looks, all in the robot's own frame, millimeters."
 frame; center x y and lift, in millimeters, say how the page places it.
 fixed is the shapes that do not move on it.  track and wheel-diameter are
 a drive base's, millimeters; track is nil without a wheel motor each side."
-  rigid treads drives arms fixed center lift forward track wheel-diameter sensors)
+  rigid treads drives arms fixed center lift forward track wheel-diameter sensors hub-up)
 
 (defparameter *sensor-faces*
   '((:color-sensor (0 0 0) (0 0 -1))
     (:distance-sensor (0 10 12) (0 1 0))
-    (:force-sensor (0 36 12) (0 1 0)))
+    (:force-sensor (0 36 12) (0 1 0))
+    (:spike-color-sensor (0 -49 0) (0 -1 0))
+    (:spike-distance-sensor (0 -69 0) (0 -1 0))
+    (:spike-force-sensor (0 -70 0) (0 -1 0)))
   "List of (type point direction): where each sensor senses from and the way it looks, in its own LDU.")
+
+(defparameter *sensor-kinds*
+  '((:spike-color-sensor . :color-sensor) (:spike-distance-sensor . :distance-sensor)
+    (:spike-force-sensor . :force-sensor))
+  "Alist: what kind of sensor each SPIKE sensor is.")
 
 (defun sensor-of (spec center lowest)
   (destructuring-bind (point dir) (rest (assoc (spec-type spec) *sensor-faces*))
     (let ((rows (spec-rotation spec)))
       (destructuring-bind (x y z) (mapcar #'mm (v+ (spec-at spec) (rotate rows point)))
         (destructuring-bind (dx dy dz) (mapcar #'(lambda (v) (float v 1d0)) (rotate rows dir))
-          (make-sensor :kind (spec-type spec) :id (spec-id spec)
+          (make-sensor :kind (or (cdr (assoc (spec-type spec) *sensor-kinds*)) (spec-type spec)) :id (spec-id spec)
                        :x (float (- x (first center)) 1d0) :y (float (- y (second center)) 1d0)
                        :z (float (- z (mm lowest)) 1d0) :dx dx :dy dy :dz dz))))))
 
@@ -235,7 +266,7 @@ weight, as on even springs; or nil when the build would tip."
   "List of point and axis of a part that rolls on the mat, or nil."
   (let ((connector (case (spec-type spec)
                      (:tyre (find :tyre-seat (world-connectors spec) :key #'connector-kind))
-                     ((:wheel :rim) (find :axle-hole (world-connectors spec) :key #'connector-kind)))))
+                     ((:wheel :rim :spike-wheel) (find :axle-hole (world-connectors spec) :key #'connector-kind)))))
     (when (and connector (< (abs (third (connector-dir connector))) 1/100))
       (list (connector-point connector) (shared-axis (connector-dir connector))))))
 
@@ -269,7 +300,9 @@ would set a motor's polarity."
                  (rides (riding-groups specs survey speeds))
                  (first-wheel (find-if #'(lambda (e) (roller-line (nth (first e) specs))) entries))
                  (polarity (if (and first-wheel (minusp (second first-wheel))) -1 1))
-                 (drive (make-drive :id (spec-id (nth m specs))))
+                 (drive (make-drive :id (spec-id (nth m specs))
+                                    :free-speed (float (motor-free-speed (spec-type (nth m specs))) 1d0)
+                                    :stall (float (motor-stall (spec-type (nth m specs))) 1d0)))
                  ;; Pybricks sees a motor turn clockwise looking at its
                  ;; shaft: about the shaft's way out of the motor, backwards
                  (shaft (first (first (motor-seeds specs survey m))))
@@ -392,7 +425,7 @@ built, for a part that moves.  Thin parts take a few larger balls."
                                                             (float (/ w 2) 1d0) (float (/ d 2) 1d0))))))
             (dolist (tread driven)
               (incf (drive-wheels (tread-drive tread)))
-              (setf (drive-top (tread-drive tread)) (* *free-speed* (tread-ratio tread) (tread-radius tread))))
+              (setf (drive-top (tread-drive tread)) (* (drive-free-speed (tread-drive tread)) (tread-ratio tread) (tread-radius tread))))
             (dolist (drive drives)
               ;; which side of the way it faces its wheels stand on
               (let ((across (loop for tread in driven
@@ -406,6 +439,8 @@ built, for a part that moves.  Thin parts take a few larger balls."
                                      :center center :forward (list fx fy)
                                      :lift (- (mm lowest))
                                      :wheel-diameter (* 2 (tread-radius (first driven)))
+                                     :hub-up (let ((hub (find :spike-hub stays :key #'spec-type)))
+                                               (and hub (rotate (spec-rotation hub) '(0 0 1))))
                                      :sensors (loop for spec in stays
                                                     when (assoc (spec-type spec) *sensor-faces*)
                                                       collect (sensor-of spec center lowest)))))
@@ -484,8 +519,8 @@ give, as for a wheel."
   (let* ((drive (arm-drive arm))
          (ratio (arm-ratio arm))
          (power (within (* 4d0 (- (arm-target arm) (arm-angle arm))) (arm-speed arm)))
-         (stiffness (/ *stall-torque* (* ratio ratio *free-speed*)))
-         (free (* power *free-speed* ratio))
+         (stiffness (/ (drive-stall drive) (* ratio ratio (drive-free-speed drive))))
+         (free (* power (drive-free-speed drive) ratio))
          (rate (/ (+ (* (arm-inertia arm) (arm-rate arm))
                      (* dt (+ (* stiffness free) (arm-weight-torque arm) (arm-load arm))))
                   (+ (arm-inertia arm) (* dt stiffness))))
@@ -538,6 +573,24 @@ give, as for a wheel."
                                 (* az (- (* rx by) (* ry bx))))
                              dt))))))))))))
 
+(defun count-treads! (robot dt)
+  "After a step, how far each driven wheel turned: as the robot went, where
+it gripped, as its motor spun it, where it slipped."
+  (let ((rigid (robot-rigid robot)))
+    (dolist (tread (robot-treads robot))
+      (let ((drive (tread-drive tread)))
+        (when (and drive (tread-radius tread))
+          (let* ((px (world-x rigid (tread-x tread) (tread-y tread)))
+                 (py (world-y rigid (tread-x tread) (tread-y tread)))
+                 (fx (- (* (tread-fx tread) (rigid-cos rigid)) (* (tread-fy tread) (rigid-sin rigid))))
+                 (fy (+ (* (tread-fx tread) (rigid-sin rigid)) (* (tread-fy tread) (rigid-cos rigid))))
+                 (share (drive-wheels drive))
+                 (surface (or (tread-spin tread)
+                              (multiple-value-bind (vx vy) (point-velocity rigid px py)
+                                (+ (* vx fx) (* vy fy))))))
+            (incf (drive-rolled drive) (/ (* surface dt) share))
+            (incf (drive-angle drive) (/ (* surface dt) (* share (tread-radius tread) (tread-ratio tread))))))))))
+
 (defun roll-tread! (rigid tread dt)
   "What tread does between rigid and the mat in dt."
   (let* ((px (world-x rigid (tread-x tread) (tread-y tread)))
@@ -567,8 +620,8 @@ give, as for a wheel."
                   (let* ((ratio (tread-ratio tread))
                          (share (drive-wheels drive))
                          (reach (* (abs ratio) radius))
-                         (free (* (drive-power drive) *free-speed* ratio radius))
-                         (stiffness (/ *stall-torque* (* *free-speed* reach reach share)))
+                         (free (* (drive-power drive) (drive-free-speed drive) ratio radius))
+                         (stiffness (/ (drive-stall drive) (* (drive-free-speed drive) reach reach share)))
                          (give (* dt (mass-along rigid px py fx fy)))
                          (force (/ (* stiffness (- free rolling)) (+ 1d0 (* stiffness give))))
                          (grips? (<= (abs force) limit))
@@ -578,8 +631,9 @@ give, as for a wheel."
                                       (+ rolling (* held give))
                                       (- free (/ held stiffness)))))
                     (push-rigid! rigid px py (* held dt fx) (* held dt fy))
-                    (incf (drive-rolled drive) (/ (* surface dt) share))
-                    (incf (drive-angle drive) (/ (* surface dt) (* share radius ratio))))
+                    ;; a gripping wheel turns as the robot goes, which the
+                    ;; step will tell (count-treads!); a slipping one spins
+                    (setf (tread-spin tread) (if grips? nil surface)))
                   (resist fx fy rolling (* *rolling* (tread-load tread))))))))))
 
 ;;

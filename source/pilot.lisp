@@ -435,11 +435,16 @@ down at acceleration; and the time the move takes."
 
 (defun radians (degrees) (* degrees (/ pi 180)))
 
+(defparameter *pybricks-rated-speed* (* 1000 (/ pi 180))
+  "Radians a second: the top speed Pybricks rates a SPIKE angular motor
+at, which its default drive settings are shares of.")
+
 (defun default-pilot (robot heading table)
   "The settings Pybricks starts a drive base on, for this robot's motors and wheels."
-  (let* ((top (reduce #'min (robot-wheel-drives robot) :key #'drive-top))
+  (let* ((top (reduce #'min (robot-wheel-drives robot)
+                      :key #'(lambda (d) (* *pybricks-rated-speed* (/ (drive-top d) (drive-free-speed d))))))
          (half (/ (or (robot-track robot) 100) 2))
-         (acceleration (* 0.75d0 *motor-acceleration* (/ top *free-speed*))))
+         (acceleration (* 0.75d0 *motor-acceleration* (/ top *pybricks-rated-speed*))))
     (make-pilot :heading (float heading 1d0)
                 :straight-speed (* 0.4d0 top)
                 :straight-acceleration acceleration
@@ -598,7 +603,7 @@ others are the things on the table its distance sensors can see."
              (unless arm
                (error (if motor "Motor ~a turns no arm." "It has no motor turning an arm.") motor))
              (incf (arm-target arm) (radians degrees))
-             (setf (arm-speed arm) (min 1d0 (/ (radians speed) (* *free-speed* (abs (arm-ratio arm))))))
+             (setf (arm-speed arm) (min 1d0 (/ (radians speed) (* (drive-free-speed (arm-drive arm)) (abs (arm-ratio arm))))))
              (let ((limit (+ 2d0 (* 3 (/ (abs degrees) speed)))))
                #'(lambda (dt)
                    (incf elapsed dt)
@@ -654,6 +659,7 @@ stopped; :frames for the page."
       (dolist (arm (robot-arms robot)) (swing-arm! arm robot *tick*))
       (when (robot-arms robot) (pose-arms! robot))
       (let ((touches (step-rigids! rigids *tick*)))
+        (count-treads! robot *tick*)
         (feel-touches! robot touches *tick*)
         (feel-forces! pilot robot touches *tick*))
       (incf seconds *tick*)

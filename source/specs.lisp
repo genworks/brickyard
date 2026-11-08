@@ -53,7 +53,9 @@ still pull the part onto it (three studs).")
     :bent-beam :grey-light :cheese-slope :white :split-cross-block :grey :triple-cross-block :grey
     :axle-hub :grey :hole-axle :grey :stud-axle :grey :axle-connector :black :stop-axle :grey
     :twin-cross-block :grey :axle-beam :grey-light :h-beam :grey-light :cross-pin :black :pin-axle :blue
-    :color-sensor :white :distance-sensor :white :force-sensor :white))
+    :color-sensor :white :distance-sensor :white :force-sensor :white
+    :spike-hub :white :spike-large-motor :white :spike-medium-motor :white :spike-color-sensor :black
+    :spike-distance-sensor :black :spike-force-sensor :black :spike-wheel :white))
 
 (defparameter *part-types*
   '(:brick :plate :tile :technic-brick :beam :axle :pin :wheel :motor :controller :gear :half-pin :axle-pin
@@ -61,8 +63,13 @@ still pull the part onto it (three studs).")
     :hole-pin :pin-block :axle-block :t-beam :round-plate :rim :tyre
     :bent-beam :cheese-slope :split-cross-block :triple-cross-block :axle-hub :hole-axle :stud-axle
     :axle-connector :stop-axle :twin-cross-block :axle-beam :h-beam :cross-pin :pin-axle
-    :color-sensor :distance-sensor :force-sensor)
+    :color-sensor :distance-sensor :force-sensor
+    :spike-hub :spike-large-motor :spike-medium-motor :spike-color-sensor :spike-distance-sensor
+    :spike-force-sensor :spike-wheel)
   "List of every part type Brickyard has.")
+
+(defparameter *wheel-types* '(:wheel :rim :spike-wheel)
+  "List of the part types that are wheels: they turn on an axle through their axle hole.")
 
 (defun mm (ldu) (* ldu *mm-per-ldu*))
 
@@ -171,7 +178,9 @@ brick family, (n) for beams and axles, () for a pin."
       ((:half-pin :bush :round-tile :motor :controller :pin-joiner :stop-pin :hole-pin
         :pin-block :axle-block :t-beam :round-plate :rim :tyre :bent-beam :cheese-slope
         :split-cross-block :triple-cross-block :axle-hub :stud-axle :axle-connector :twin-cross-block
-        :axle-beam :h-beam :cross-pin :pin-axle :color-sensor :distance-sensor :force-sensor)
+        :axle-beam :h-beam :cross-pin :pin-axle :color-sensor :distance-sensor :force-sensor
+        :spike-hub :spike-large-motor :spike-medium-motor :spike-color-sensor :spike-distance-sensor
+        :spike-force-sensor :spike-wheel)
        nil))))
 
 (defun move-spec (spec at)
@@ -247,8 +256,91 @@ from it toward :front, 157.5 and 112.5 degrees off, as the library has them."
 ;; :force-sensor  a body 2 by 2 studs and a brick high, studs on top,
 ;;                sockets below, a button standing out of its :rear face
 ;;
+;; The SPIKE Prime parts are LEGO's own, their boxes and holes read from
+;; the LDraw library's files (library.ldraw.org, CC BY 4.0) and turned
+;; into Brickyard's frame, LDraw's x, z and -y, so that they export as
+;; the library parts they are.  Only the numbers are taken; they are
+;; drawn here as boxes.  The motors' outputs share an axis through the
+;; round end: the crosshole underneath, the rotating disc on top (whose
+;; pin holes are taken to stand still).  The sensors look out of their
+;; -y face, the force sensor's button stands out of it, and the hub's
+;; buttons are on top.
+;;
+
+(defparameter *spike-parts*
+  '((:spike-hub "45601" ((-70 -110 0) (70 110 80))
+     (((-60 -100 70) (0 0 1)) ((-60 100 70) (0 0 1)) ((60 -100 70) (0 0 1)) ((60 100 70) (0 0 1))
+      ((60 100 10) (0 0 1)) ((60 80 10) (1 0 0)) ((60 80 30) (1 0 0)) ((60 80 50) (1 0 0)) ((60 40 10) (1 0 0))
+      ((60 60 10) (0 0 1)) ((40 100 10) (0 1 0)) ((40 100 30) (0 1 0)) ((40 100 50) (0 1 0)) ((20 100 10) (0 0 1))
+      ((60 -100 10) (0 0 1)) ((60 -80 10) (1 0 0)) ((60 -80 30) (1 0 0)) ((60 -80 50) (1 0 0)) ((60 -40 10) (1 0 0))
+      ((60 -60 10) (0 0 1)) ((40 -100 10) (0 1 0)) ((40 -100 30) (0 1 0)) ((40 -100 50) (0 1 0)) ((20 -100 10) (0 0 1))
+      ((-60 100 10) (0 0 1)) ((-60 80 10) (1 0 0)) ((-60 80 30) (1 0 0)) ((-60 80 50) (1 0 0)) ((-60 40 10) (1 0 0))
+      ((-60 60 10) (0 0 1)) ((-40 100 10) (0 1 0)) ((-40 100 30) (0 1 0)) ((-40 100 50) (0 1 0)) ((-20 100 10) (0 0 1))
+      ((-60 -100 10) (0 0 1)) ((-60 -80 10) (1 0 0)) ((-60 -80 30) (1 0 0)) ((-60 -80 50) (1 0 0)) ((-60 -40 10) (1 0 0))
+      ((-60 -60 10) (0 0 1)) ((-40 -100 10) (0 1 0)) ((-40 -100 30) (0 1 0)) ((-40 -100 50) (0 1 0)) ((-20 -100 10) (0 0 1)))
+     nil)
+    (:spike-large-motor "54675" ((-50 -30 -30) (50 150 50))
+     (((40 -20 20) (1 0 0)) ((40 20 20) (1 0 0)) ((40 -20 0) (0 1 0)) ((40 0 20) (0 0 1)) ((-40 -20 20) (1 0 0))
+      ((-40 20 20) (1 0 0)) ((-40 -20 0) (0 1 0)) ((-40 0 20) (0 0 1)) ((40 -20 -20) (1 0 0)) ((40 0 -20) (0 0 1))
+      ((40 20 -20) (1 0 0)) ((-40 -20 -20) (1 0 0)) ((-40 0 -20) (0 0 1)) ((-40 20 -20) (1 0 0)) ((40 140 0) (0 1 0))
+      ((40 140 20) (1 0 0)) ((40 100 20) (1 0 0)) ((40 120 20) (0 0 1)) ((40 80 20) (0 0 1)) ((40 140 -20) (1 0 0))
+      ((40 100 -20) (1 0 0)) ((40 120 -20) (0 0 1)) ((40 80 -20) (0 0 1)) ((-40 140 0) (0 1 0)) ((-40 140 20) (1 0 0))
+      ((-40 100 20) (1 0 0)) ((-40 120 20) (0 0 1)) ((-40 80 20) (0 0 1)) ((-40 140 -20) (1 0 0)) ((-40 100 -20) (1 0 0))
+      ((-40 120 -20) (0 0 1)) ((-40 80 -20) (0 0 1)) ((-20 0 40) (0 0 1)) ((0 20 40) (0 0 1)) ((20 0 40) (0 0 1)))
+     (((0 0 -20) (0 0 -1) 10) ((0 0 40) (0 0 1) 10)))
+    (:spike-medium-motor "54696" ((-30 -29 -30) (30 150 50))
+     (((20 -20 20) (1 0 0)) ((20 20 20) (1 0 0)) ((-20 -20 20) (1 0 0)) ((-20 20 20) (1 0 0)) ((20 -20 -20) (1 0 0))
+      ((20 0 -20) (0 0 1)) ((20 20 -20) (1 0 0)) ((-20 -20 -20) (1 0 0)) ((-20 0 -20) (0 0 1)) ((-20 20 -20) (1 0 0))
+      ((0 -20 -20) (0 0 1)) ((20 140 -20) (1 0 0)) ((20 140 20) (1 0 0)) ((20 140 0) (0 1 0)) ((-20 140 -20) (1 0 0))
+      ((-20 140 20) (1 0 0)) ((-20 140 0) (0 1 0)) ((0 140 -20) (0 0 1)) ((-20 0 40) (0 0 1)) ((0 20 40) (0 0 1))
+      ((20 0 40) (0 0 1)))
+     (((0 0 -20) (0 0 -1) 10) ((0 0 40) (0 0 1) 10)))
+    (:spike-color-sensor "37308" ((-30 -49 -29) (30 10 29))
+     (((20 0 -20) (1 0 0)) ((20 0 20) (1 0 0)) ((20 0 0) (0 1 0)) ((-20 0 20) (1 0 0)) ((-20 0 -20) (1 0 0))
+      ((-20 0 0) (0 1 0)))
+     nil)
+    (:spike-distance-sensor "37316" ((-70 -69 -29) (70 10 29))
+     (((60 0 -20) (1 0 0)) ((60 0 20) (1 0 0)) ((60 0 0) (0 1 0)) ((-60 0 -20) (1 0 0)) ((-60 0 20) (1 0 0))
+      ((-60 0 0) (0 1 0)))
+     nil)
+    (:spike-force-sensor "37312" ((-30 -70 -30) (30 50 29))
+     (((20 -40 20) (1 0 0)) ((20 -40 -20) (1 0 0)) ((20 -20 -20) (0 0 1)) ((-20 -40 20) (1 0 0)) ((-20 -40 -20) (1 0 0))
+      ((-20 -20 -20) (0 0 1)) ((20 40 -20) (1 0 0)) ((20 40 20) (1 0 0)) ((20 40 0) (0 1 0)) ((20 20 -20) (0 0 1))
+      ((-20 40 -20) (1 0 0)) ((-20 40 20) (1 0 0)) ((-20 40 0) (0 1 0)) ((-20 20 -20) (0 0 1)))
+     (((0 -60 0) (0 1 0) 10)))
+    (:spike-wheel "39367" ((-70 -18 -70) (70 18 70))
+     (((0 0 -20) (0 1 0)) ((0 0 -40) (0 1 0)) ((-20 0 0) (0 1 0)) ((-40 0 0) (0 1 0)) ((0 0 20) (0 1 0))
+      ((0 0 40) (0 1 0)) ((20 0 0) (0 1 0)) ((40 0 0) (0 1 0)))
+     (((0 -1 0) (0 1 0) 9))))
+  "List of (type ldraw-number box pin-holes axle-holes), in LDU: box its
+low and high corners, a pin hole (point axis) a stud deep, an axle hole
+(point axis half-length), the first a motor's crosshole output with its
+axis pointing out.")
+
+(defun spike-connectors (entry)
+  (destructuring-bind (type number box pins axles) entry
+    (declare (ignore type number box))
+    (append (mapcar #'(lambda (axle)
+                        (destructuring-bind (point dir half) axle
+                          (make-connector :kind :axle-hole :point point :dir dir :half half)))
+                    axles)
+            (mapcar #'(lambda (pin)
+                        (destructuring-bind (point dir) pin
+                          (make-connector :kind :pin-hole :point point :dir dir :half 10)))
+                    pins))))
 
 (defun local-connectors (spec)
+  "List of the part's own connectors, in its own LDU."
+  (let ((spike (assoc (spec-type spec) *spike-parts*)))
+    (if spike (spike-connectors spike) (stock-connectors spec))))
+
+(defun local-extent (spec)
+  "List of two corners, low and high, of the part's own box in LDU, studs left out."
+  (let ((spike (assoc (spec-type spec) *spike-parts*)))
+    (if spike (copy-tree (third spike)) (stock-extent spec))))
+;;
+
+(defun stock-connectors (spec)
   (let ((size (spec-size spec)) (type (spec-type spec)))
     (ecase type
       ((:brick :plate :tile :technic-brick)
@@ -420,7 +512,7 @@ from it toward :front, 157.5 and 112.5 degrees off, as the library has them."
        (append (grid-connectors :stud 2 2 24 '(0 0 1))
                (grid-connectors :socket 2 2 0 '(0 0 -1)))))))
 
-(defun local-extent (spec)
+(defun stock-extent (spec)
   "List of two corners, low and high, of the part's own box in LDU, studs left out."
   (let ((size (spec-size spec)))
     (ecase (spec-type spec)
@@ -799,9 +891,9 @@ happen to face."
                    (progn
                      (case (if (member (aref types i) *shafts*) :shaft (aref types i))
                        (:shaft
-                        (when (and (member (aref types j) '(:gear :wheel :rim)) (held-p j :axle-hole i :axle))
+                        (when (and (member (aref types j) (cons :gear *wheel-types*)) (held-p j :axle-hole i :axle))
                           (push (list j speed) result)))
-                       ((:gear :wheel :rim)
+                       ((:gear :wheel :rim :spike-wheel)
                         (when (and (member (aref types j) *shafts*) (held-p i :axle-hole j :axle))
                           (push (list j speed) result))
                         (when (and (eql (aref types i) :gear) (eql (aref types j) :gear)
@@ -825,13 +917,16 @@ happen to face."
                               (list j 1)))
                         (aref (neighbors survey) m)))))
 
+(defparameter *motor-types* '(:motor :spike-large-motor :spike-medium-motor)
+  "List of the part types that are motors: each turns what its axle holes hold.")
+
 (defun motors-turning (specs survey)
   "Three values: a hash table from each part the motors turn to its speed;
 a list of the indices jammed, by two paths from one motor or by two
 motors at odds; and a list of (motor speeds), each motor's own table."
   (let ((all (make-hash-table)) jammed trains)
     (dotimes (m (length specs))
-      (when (eql (spec-type (nth m specs)) :motor)
+      (when (member (spec-type (nth m specs)) *motor-types*)
         (multiple-value-bind (speeds jam) (spread-turning specs survey (motor-seeds specs survey m))
           (setf jammed (union jam jammed))
           (push (list m speeds) trains)
@@ -849,7 +944,7 @@ motors at odds; and a list of (motor speeds), each motor's own table."
       (dolist (train trains)
         (destructuring-bind (m speeds) train
           (dotimes (w (length specs))
-            (when (member (spec-type (nth w specs)) '(:wheel :rim))
+            (when (member (spec-type (nth w specs)) *wheel-types*)
               (multiple-value-bind (speed seen?) (gethash w speeds)
                 (when seen? (push (list m w speed) drives)))))))
       (values (nreverse drives) jammed))))
@@ -869,7 +964,7 @@ axis every part on a line and every gear of a train turns about."
   "List of point and axis: the line spec turns about, or nil for a part that does not turn."
   (let* ((kind (cond ((member (spec-type spec) *shafts*) :axle)
                      ((eql (spec-type spec) :gear) :gear)
-                     ((member (spec-type spec) '(:wheel :rim)) :axle-hole)))
+                     ((member (spec-type spec) *wheel-types*) :axle-hole)))
          (connector (and kind (find kind (world-connectors spec) :key #'connector-kind))))
     (when connector
       (list (connector-point connector) (shared-axis (connector-dir connector))))))
