@@ -417,9 +417,9 @@ nil when there is none."
       (:meta :charset "utf-8")
       (:meta :name "viewport" :content "width=device-width, initial-scale=1")
       (:title "Brickyard")
-      (:link :rel "stylesheet" :href "/brickyard/static/brickyard.css")
+      (:link :rel "stylesheet" :href (static-url "brickyard.css"))
       (:script :src gwl::*x-ite-url*)
-      (:script :src "/brickyard/static/brickyard.js" :defer "defer"))
+      (:script :src (static-url "brickyard.js") :defer "defer"))
      ;; cl-who writes attribute values raw: the note is escaped here
      (:body :data-build build-id :data-note (and note (cl-who:escape-string note))
       (:header (:h1 "Brickyard")
@@ -730,6 +730,13 @@ GET with no body; its own refusal would keep alive and read one."
 
 (defun not-found (req ent)
   (refuse-closing req ent net.aserve:*response-not-found* "text/plain" "Not found."))
+
+(defun static-url (name)
+  "Where the page asks for static file name: with the file's date, so that
+a cache in front of the server (the edge keeps these four hours) asks
+again for a file that changed."
+  (format nil "/brickyard/static/~a?v=~a" name
+          (or (ignore-errors (file-write-date (merge-pathnames name *static-directory*))) 0)))
 
 (defun static-handler (req ent)
   "The page's script and style, open to all; a published directory, and
