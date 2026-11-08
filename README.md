@@ -108,6 +108,24 @@ answers only for names it offers, and the browser remembers the choice.
 A model that shares a GPU with something else can take `:turn`, a
 function of one thunk, and each of its prompts runs inside that.
 
+## Missions and the score
+
+Two models stand on the table and turn when the robot meets them: a
+lever, a bar hinged on a post by the north wall that swings up to 90
+degrees and stops, and a spinner south of the launch area, a cross of
+two bars turning freely about its middle.  Each is a body that cannot
+move, only turn about its post, so the robot's push turns it as hard as
+it pushes and as far out on the bar as it meets it; an arm raised above
+one passes over it.  After a run the table scores itself: 10 a piece in
+the red ring, 5 in the blue or the yellow, 25 for the lever turned 60
+degrees, 15 for the spinner turned 45.  Like the mat, the missions and
+the scoring are Brickyard's own; the table is a plist (`*table*` in
+`source/table.lisp`) and new missions and rules go there.
+
+```lisp
+(turn -90) (straight 400) (turn 90) (straight 900)    ; flips the lever: 25
+```
+
 ## SPIKE Prime parts
 
 The SPIKE Prime row of the parts bin has LEGO's own: the hub, the large

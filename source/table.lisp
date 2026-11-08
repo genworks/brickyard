@@ -47,8 +47,28 @@
     :pieces ((:ball 760 571) (:ball 1000 820) (:ball 1000 320) (:ball 1520 571)
              (:ball 1720 950) (:crate 1460 300) (:crate 1520 850))
     ;; x y width depth, about its center: stays where it stands
-    :fixed ((1660 230 40 240)))
+    :fixed ((1660 230 40 240))
+    ;; kind x y angle size: a lever is a bar hinged at x y on a post,
+    ;; pointing angle degrees (0 along the table, 90 across it), size long,
+    ;; that swings counterclockwise as far as :swing and stops there; a
+    ;; spinner is a cross of two bars size from its middle, turning freely
+    :missions ((:lever 900 1100 270 220 :swing 90)
+               (:spinner 560 250 0 110))
+    ;; what a run scores: each piece in a ring, a mission turned far enough
+    :scoring ((:ring :red 10) (:ring :blue 5) (:ring :yellow 5)
+              (:lever 0 60 25) (:spinner 1 45 15)))
   "Plist. The table: its size in millimeters, what is printed on the mat, and what stands on it.")
+
+(defparameter *missions*
+  '((:lever :grams 50 :width 16 :height 40 :spin-drag 3d0 :color (0.2 0.55 0.35))
+    (:spinner :grams 60 :width 16 :height 40 :spin-drag 2d0 :color (0.55 0.3 0.6)))
+  "List of (kind properties): the models on the table that turn when pushed.")
+
+(defstruct mission
+  "A model on the table: its kind, its index in the table's :missions, the
+rigid that turns, the angle it started at, and how far it may swing, in
+radians counterclockwise, nil for no stop."
+  kind index rigid (start 0d0 :type double-float) swing)
 
 (defparameter *pieces*
   '((:ball :radius 24 :grams 30 :restitution 0.5d0 :drag 300d0 :color (0.95 0.55 0.1))
@@ -686,6 +706,75 @@ it gripped, as its motor spun it, where it slipped."
         for index from 0
         collect (piece-rigid kind x y index)))
 
+(defun mission-of (spec index)
+  "The mission spec, (kind x y angle size &key swing), makes: a body that
+cannot move, only turn about x y."
+  (destructuring-bind (kind x y angle size &key swing) spec
+    (destructuring-bind (&key grams width height spin-drag color) (rest (assoc kind *missions*))
+      (declare (ignore color))
+      (let* ((mass (/ grams 1000d0))
+             (half (/ width 2d0))
+             (inertia (ecase kind
+                        ;; a bar about its end; two bars crossed about their middle
+                        (:lever (/ (* mass size size) 3))
+                        (:spinner (/ (* mass size size) 3))))
+             (shapes (ecase kind
+                       (:lever (list (make-rect-shape (/ size 2d0) 0d0 (/ size 2d0) half)))
+                       (:spinner (list (make-rect-shape 0d0 0d0 (float size 1d0) half)
+                                       (make-rect-shape 0d0 0d0 half (float size 1d0))))))
+             (radians (* angle (/ pi 180))))
+        (make-mission :kind kind :index index :start (float radians 1d0)
+                      :swing (and swing (* swing (/ pi 180)))
+                      :rigid (settle-rigid!
+                              (make-rigid :name (list kind index) :x (float x 1d0) :y (float y 1d0)
+                                          :angle (float radians 1d0) :inverse-inertia (/ inertia)
+                                          :restitution 0.1d0 :spin-drag spin-drag
+                                          :height (float height 1d0) :shapes shapes)))))))
+
+(defun table-missions (table)
+  (loop for spec in (getf table :missions)
+        for index from 0
+        collect (mission-of spec index)))
+
+(defun hold-missions! (missions)
+  "A lever stops where its swing ends, and where it started."
+  (dolist (mission missions)
+    (let ((rigid (mission-rigid mission)) (swing (mission-swing mission)))
+      (when swing
+        (let* ((turned (- (rigid-angle rigid) (mission-start mission)))
+               (held (max 0d0 (min swing turned))))
+          (unless (= held turned)
+            (setf (rigid-angle rigid) (+ (mission-start mission) held)
+                  (rigid-spin rigid) 0d0
+                  (rigid-cos rigid) (cos (rigid-angle rigid))
+                  (rigid-sin rigid) (sin (rigid-angle rigid)))))))))
+
+(defun mission-turned (mission)
+  "Whole degrees the mission has turned, counterclockwise."
+  (round (* (/ 180 pi) (- (rigid-angle (mission-rigid mission)) (mission-start mission)))))
+
+(defun run-score (result table)
+  "Two values: the points a run scored by the table's :scoring, and a line for each rule."
+  (let ((total 0) lines)
+    (dolist (rule (getf table :scoring))
+      (multiple-value-bind (scored line)
+          (ecase (first rule)
+            (:ring
+             (destructuring-bind (ring points) (rest rule)
+               (let ((n (count ring (getf result :pieces) :key #'(lambda (p) (getf p :ring)))))
+                 (values (* n points) (format nil "~a in the ~(~a~) ring: ~a" n ring (* n points))))))
+            ((:lever :spinner)
+             (destructuring-bind (index degrees points) (rest rule)
+               (let* ((m (find index (getf result :missions) :key #'(lambda (m) (getf m :index))))
+                      (turned (abs (or (getf m :turned) 0)))
+                      (done (>= turned degrees)))
+                 (values (if done points 0)
+                         (format nil "~:(~a~) ~a turned ~a degrees, ~:[short of ~a~;~a or more~]: ~a"
+                                 (first rule) index turned done degrees (if done points 0)))))))
+        (incf total scored)
+        (push line lines)))
+    (values total (nreverse lines))))
+
 (defun place-robot! (robot table)
   "Stand robot on the table's start, facing as it says.  Answers the heading it holds."
   (destructuring-bind (x y heading) (getf table :start)
@@ -747,6 +836,11 @@ angle, each drive's angle, each piece's center and angle."
                   append (list (* outer (cos angle)) (* outer (sin angle))
                                (* inner (cos angle)) (* inner (sin angle)))))))
 
+(defun x3d-disk (x y z radius height color)
+  "An upright cylinder: X3D's stands on its y."
+  (format nil "<Transform translation=\"~,2f ~,2f ~,2f\" rotation=\"1 0 0 1.5708\"><Shape><Appearance><Material diffuseColor=\"~a\"/></Appearance><Cylinder radius=\"~,2f\" height=\"~,2f\"/></Shape></Transform>"
+          x y z (x3d-color color) radius height))
+
 (defun x3d-ball (radius color name)
   (format nil "<Transform DEF=\"~a\"><Transform translation=\"0 0 ~,2f\"><Shape><Appearance><Material diffuseColor=\"~a\"/></Appearance><Sphere radius=\"~,2f\"/></Shape></Transform></Transform>"
           name radius (x3d-color color) radius))
@@ -778,4 +872,14 @@ angle, each drive's angle, each piece's center and angle."
                         (format nil "<Transform DEF=\"~a\">~a</Transform>" name
                                 (x3d-box 0 0 half (* 2 half) (* 2 half) (* 2 half) color)))
                     s))))
+      ;; the missions after the pieces, each turning about its post
+      (loop for (kind nil nil nil size) in (getf table :missions)
+            for index from (length pieces)
+            do (destructuring-bind (&key width height color &allow-other-keys) (rest (assoc kind *missions*))
+                 (format s "<Transform DEF=\"t~a\">~a~{~a~}</Transform>" index
+                         (x3d-disk 0 0 (/ (+ height 10) 2) 10 (+ height 10) '(0.3 0.3 0.32))
+                         (ecase kind
+                           (:lever (list (x3d-box (/ size 2) 0 (/ height 2) size width height color)))
+                           (:spinner (list (x3d-box 0 0 (/ height 2) (* 2 size) width height color)
+                                           (x3d-box 0 0 (/ height 2) width (* 2 size) height color)))))))
       (format s "</Transform></Scene></X3D>"))))

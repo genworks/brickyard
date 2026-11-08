@@ -624,7 +624,11 @@ stopped; :frames for the page."
   (let* ((pilot (default-pilot robot (place-robot! robot table) table))
          (rigid (robot-rigid robot))
          (pieces (table-pieces table))
-         (others (append pieces (table-walls table)
+         (missions (table-missions table))
+         (turning (mapcar #'mission-rigid missions))
+         ;; what the page draws moving: the pieces, then the missions
+         (shown (append pieces turning))
+         (others (append pieces turning (table-walls table)
                          (mapcar #'(lambda (f) (apply #'fixed-rigid f)) (getf table :fixed))))
          (rigids (cons rigid others))
          (treads (robot-treads robot))
@@ -638,6 +642,7 @@ stopped; :frames for the page."
          (ended nil)
          (quiet 0d0))
     (when (touches-of (list* rigid (nthcdr (length pieces) others)))
+      ;; touching a mission at the start is as bad as touching a wall
       (error "It does not fit on the table's start."))
     (loop
       ;; the next step; a repeat lays out its steps that many times
@@ -659,12 +664,13 @@ stopped; :frames for the page."
       (dolist (arm (robot-arms robot)) (swing-arm! arm robot *tick*))
       (when (robot-arms robot) (pose-arms! robot))
       (let ((touches (step-rigids! rigids *tick*)))
+        (hold-missions! missions)
         (count-treads! robot *tick*)
         (feel-touches! robot touches *tick*)
         (feel-forces! pilot robot touches *tick*))
       (incf seconds *tick*)
       (when (zerop (mod tick *frame-ticks*))
-        (push (frame-of seconds robot pieces) frames))
+        (push (frame-of seconds robot shown) frames))
       (incf tick)
       ;; a program done, the table comes to rest
       (when (and (null controller) (null left))
@@ -672,11 +678,11 @@ stopped; :frames for the page."
           (setf (pilot-motion pilot) nil)
           (stop-sides! robot))
         (incf quiet *tick*)
-        (when (or (> quiet 4d0) (and (> quiet 0.3d0) (still-p (cons rigid pieces))))
+        (when (or (> quiet 4d0) (and (> quiet 0.3d0) (still-p (cons rigid shown))))
           (return)))
       (when (>= seconds *match-seconds*)
         (return)))
-    (push (frame-of seconds robot pieces) frames)
+    (push (frame-of seconds robot shown) frames)
     (list :steps (reverse ended)
           :over (and (or controller left) t)
           :seconds (/ (round (* 10 seconds)) 10d0)
@@ -687,6 +693,10 @@ stopped; :frames for the page."
                                     :at (list (round (rigid-x p)) (round (rigid-y p)))
                                     :ring (ring-of p table)))
                           pieces)
+          :missions (mapcar #'(lambda (m)
+                                (list :mission (mission-kind m) :index (mission-index m)
+                                      :turned (mission-turned m)))
+                            missions)
           :frames (coerce (reverse frames) 'vector))))
 
 (defun robot-heading (robot)
@@ -702,13 +712,16 @@ as Pybricks counts a heading."
   (destructuring-bind (step outcome seconds) entry
     (format nil "~a: ~(~a~) at ~,1f s" (step-text step) outcome seconds)))
 
-(defun run-summary (result)
-  "List of lines: where a run left the robot and the pieces."
+(defun run-summary (result &optional (table *table*))
+  "List of lines: where a run left the robot and the pieces, and what it scored."
   (let ((rung (remove nil (getf result :pieces) :key #'(lambda (p) (getf p :ring)))))
-    (append (list (format nil "Stopped at ~{~a, ~a~} facing ~a after ~,1f s."
-                          (getf result :robot) (getf result :heading) (getf result :seconds)))
-            (mapcar #'(lambda (p)
-                        (format nil "~:(~a~) ~a is in the ~(~a~) ring."
-                                (getf p :piece) (getf p :index) (getf p :ring)))
-                    rung)
-            (when (getf result :over) (list "The match ended first.")))))
+    (multiple-value-bind (score lines) (run-score result table)
+      (append (list (format nil "Stopped at ~{~a, ~a~} facing ~a after ~,1f s."
+                            (getf result :robot) (getf result :heading) (getf result :seconds)))
+              (mapcar #'(lambda (p)
+                          (format nil "~:(~a~) ~a is in the ~(~a~) ring."
+                                  (getf p :piece) (getf p :index) (getf p :ring)))
+                      rung)
+              (when (getf result :over) (list "The match ended first."))
+              (list (format nil "Score: ~a" score))
+              (mapcar #'(lambda (line) (format nil "  ~a" line)) lines)))))

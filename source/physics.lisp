@@ -231,7 +231,9 @@ corners of each rectangle inside the other the points of contact."
   (let (touches)
     (loop for (a . others) on rigids
           do (dolist (b others)
-               (when (and (plusp (+ (rigid-inverse-mass a) (rigid-inverse-mass b))) (in-reach-p a b))
+               (when (and (plusp (+ (rigid-inverse-mass a) (rigid-inverse-mass b)
+                                    (rigid-inverse-inertia a) (rigid-inverse-inertia b)))
+                          (in-reach-p a b))
                  (dolist (sa (rigid-shapes a))
                    (dolist (sb (rigid-shapes b))
                      (setf touches (shapes-touching a sa b sb touches)))))))
@@ -326,7 +328,9 @@ Answers the touches, each with what it pressed and rubbed."
     (dolist (rigid rigids)
       (when (plusp (rigid-inverse-mass rigid))
         (incf (rigid-x rigid) (* dt (rigid-vx rigid)))
-        (incf (rigid-y rigid) (* dt (rigid-vy rigid)))
+        (incf (rigid-y rigid) (* dt (rigid-vy rigid))))
+      ;; a body that cannot move but can turn is hinged at its origin
+      (when (plusp (rigid-inverse-inertia rigid))
         (incf (rigid-angle rigid) (* dt (rigid-spin rigid)))
         (setf (rigid-cos rigid) (cos (rigid-angle rigid))
               (rigid-sin rigid) (sin (rigid-angle rigid)))))

@@ -32,7 +32,7 @@
 
 (defun bare-table ()
   (let ((table (copy-list *table*)))
-    (setf (getf table :pieces) nil (getf table :fixed) nil)
+    (setf (getf table :pieces) nil (getf table :fixed) nil (getf table :missions) nil)
     table))
 
 (defun drive-test (program &key (specs *robot-build*) (table (bare-table)))
@@ -234,13 +234,36 @@
                     "drive_base = DriveBase(left_motor, right_motor, wheel_diameter=56, axle_track=136)"))
       (check (format nil "Python: ~a" line) (search line text) text))))
 
+(defun test-missions ()
+  (flet ((run (text) (run-program (test-robot *robot-build*) (checked-program (read-program text)))))
+    (let* ((result (run "(turn -90) (straight 400) (turn 90) (straight 900)"))
+           (lever (getf (first (getf result :missions)) :turned)))
+      (check "driving into the lever swings it past 60 degrees, and it scores 25"
+             (and (<= 60 lever 90) (= 25 (run-score result *table*))) (list lever (run-score result *table*))))
+    (let* ((result (run "(turn -90) (straight 400) (turn 90) (straight 1100) (turn -30) (straight 200)"))
+           (lever (getf (first (getf result :missions)) :turned)))
+      (check "the lever stops at the end of its swing" (<= lever 90) lever))
+    (let* ((result (run "(turn 90) (straight 170) (turn -90) (straight 700)"))
+           (spinner (getf (second (getf result :missions)) :turned)))
+      (check "catching a spoke near its end turns the spinner, clockwise, enough to score"
+             (and (<= spinner -45) (= 15 (run-score result *table*))) (list spinner (run-score result *table*))))
+    (let ((result (run "(turn 90) (straight 100) (turn -90) (straight 700)")))
+      (check "a robot that misses the spinner leaves it be" (zerop (getf (second (getf result :missions)) :turned))))
+    (let ((result (run-program (test-robot *robot-build*) (checked-program (read-program *sample-program*)))))
+      (check "the sample program scores 20: two balls in the red ring" (= 20 (run-score result *table*))
+             (run-score result *table*)))))
+
 (defun fingerprint ()
   "Where a long run leaves everything, for comparing one Lisp with another."
   (let ((result (run-program (test-robot *arm-build*)
                              (checked-program (read-program "(turn 21) (straight 547) (turn -21) (arm -25) (straight 600) (arm 25) (arc -400 :angle 60) (straight -300)")))))
     (list (getf result :robot) (getf result :heading) (getf result :seconds)
           (mapcar #'(lambda (p) (getf p :at)) (getf result :pieces))
-          (sensor-test "(straight 300) (follow-line :until (> (driven) 1200)) (turn 90) (drive 150 0) (wait-until (or (pressed) (< (distance) 120))) (stop)"))))
+          (sensor-test "(straight 300) (follow-line :until (> (driven) 1200)) (turn 90) (drive 150 0) (wait-until (or (pressed) (< (distance) 120))) (stop)")
+          (mapcar #'(lambda (m) (getf m :turned))
+                  (getf (run-program (test-robot *robot-build*)
+                                     (checked-program (read-program "(turn -90) (straight 400) (turn 90) (straight 900) (turn 90) (straight 700) (turn 90) (straight 520) (turn 90) (straight 200)")))
+                        :missions)))))
 
 (defun run-tests ()
   (setf *checks* nil)
@@ -250,6 +273,7 @@
   (test-pybricks)
   (test-sensors)
   (test-spike)
+  (test-missions)
   (format t "~&fingerprint ~s~%" (fingerprint))
   (let ((failed (count nil *checks* :key #'second)))
     (format t "~&~a passed, ~a failed~%" (- (length *checks*) failed) failed)
