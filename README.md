@@ -127,7 +127,33 @@ real hub:
 (arm -25)                  ; degrees at the arm, and hold it there
 (arm 40 :speed 300 :motor 9)   ; deg/s, and which motor
 (wait 1000)                ; milliseconds
+(drive 200 0)              ; keep driving, on to the next step
+(wait-until (< (reflection) 30))   ; until a sensor says so
+(stop)
+(follow-line :until (> (driven) 800) :speed 100 :gain 1 :target 50)
+(repeat 4 (straight 300) (turn 90))
 ```
+
+Conditions read the sensors and the drive base, as Pybricks does:
+`(reflection)` and `(color)` from a color sensor, `(distance)` from a
+distance sensor (2000 when it sees nothing), `(force)` in newtons and
+`(pressed)` (3 N or more) from a force sensor, `(heading)` in degrees
+clockwise from the start, and `(driven)` in millimeters; give a part id,
+`(reflection 12)`, when there are two of a kind.  Compare with `<` `>`
+`<=` `>=` `=` `/=`, name colors as `red` `yellow` `green` `blue` `white`
+and `none` (a color sensor calls black none, as Pybricks' does), and
+join with `and` `or` `not`.  Sensor robot on the page has one of each:
+a color sensor under the plate looking down, a distance sensor on the
+controller looking ahead, a force sensor's button in front.
+
+The color sensor reads the mat's printed colors where it looks, over a
+spot a few millimeters across, so an edge reads between its two sides,
+and weaker the higher it is; the distance sensor sees walls and pieces
+taller than itself; the force sensor feels what its button touches.
+`follow-line` turns at (reflection - target) * gain degrees a second,
+so a positive gain keeps the line on the sensor's right; the sample
+robot's sensor is close to its wheels, and holds a line at 100 mm/s but
+not at 150, as a real one would.
 
 The robot here drives as a Pybricks drive base does: each move follows
 a trapezoid of speed, the wheels' angles count the distance, the hub's
@@ -139,7 +165,9 @@ The Pybricks button writes the program out as a Pybricks program to
 save and open in Pybricks Code: the left wheel motor on port A, the
 right on B, arm motors on C to F, each motor's direction worked out from
 which way it faces in the build, a gear train as `gears=`, and the
-build's wheel diameter and axle track.  It assumes the hub lies flat,
+build's wheel diameter and axle track, and each sensor as Pybricks'
+ColorSensor, UltrasonicSensor or ForceSensor on the next free port, a
+condition as a `while not (...)` loop.  It assumes the hub lies flat,
 buttons up, facing the way the robot drives.  None of this has yet been
 run on a real hub.
 

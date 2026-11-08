@@ -136,12 +136,72 @@
                                     (pybricks-program robot nil))))
                      ""))))
 
+(defun sensor-test (text)
+  "Where a run of text leaves the sensor robot, its heading, and its color sensor."
+  (let* ((robot (test-robot *sensor-build*))
+         (result (run-program robot (checked-program (read-program text)) :table (bare-table))))
+    (multiple-value-bind (x y) (sensor-place robot (find :color-sensor (robot-sensors robot) :key #'sensor-kind))
+      (append (getf result :robot) (list (getf result :heading) (round x) (round y))))))
+
+(defun test-sensors ()
+  ;; the vertical line's near edge is x = 1200, from y 581 up; the
+  ;; robot's color sensor is 32 mm to its left, 13 mm ahead
+  (destructuring-bind (x y heading sx sy) (sensor-test "(drive 150 0) (wait-until (< (reflection) 30)) (stop)")
+    (declare (ignore x y heading sy))
+    (check "wait-until a dark reflection stops on a line" (<= 1200 sx 1222) sx))
+  (destructuring-bind (x &rest rest) (sensor-test "(drive 200 0) (wait-until (< (distance) 150)) (stop)")
+    (declare (ignore rest))
+    ;; its distance sensor is 21 mm ahead of its middle; the wall at 2362
+    (check "wait-until a near distance stops short of the wall" (<= 2180 x 2200) x))
+  (destructuring-bind (x &rest rest) (sensor-test "(drive 150 0) (wait-until (pressed)) (stop)")
+    (declare (ignore rest))
+    (check "wait-until pressed stops with the button on the wall" (<= 2325 x 2340) x))
+  (destructuring-bind (x y heading sx sy) (sensor-test "(drive 150 0) (wait-until (= (color) red)) (stop)")
+    (declare (ignore x y heading))
+    ;; the red ring's outer edge is 180 from (1900 571)
+    (check "wait-until red stops on the red ring"
+           (< 170 (sqrt (+ (expt (- sx 1900) 2) (expt (- sy 571) 2))) 182) (list sx sy)))
+  (destructuring-bind (x y heading sx sy) (sensor-test "(drive 150 -45) (wait-until (<= (heading) -90)) (stop)")
+    (declare (ignore x y sx sy))
+    (check "the heading counts as Pybricks', counterclockwise negative" (<= -93 heading -87) heading))
+  (destructuring-bind (x y heading sx sy) (sensor-test "(straight 300) (follow-line :until (> (driven) 1200))")
+    (declare (ignore y sx))
+    (check "follow-line keeps the sensor on the line's edge"
+           (and (> x 1250) (<= 576 sy 586) (<= -3 heading 3)) (list x sy heading)))
+  (destructuring-bind (x y heading &rest rest) (sensor-test "(repeat 4 (straight 200) (turn 90))")
+    (declare (ignore rest))
+    (check "repeat 4 of a side and a turn comes home" (and (near x 190 6) (near y 571 6) (near heading 0 1))
+           (list x y heading)))
+  (check "a condition must compare something"
+         (search "compares two things" (or (refusal #'(lambda () (checked-program '((:wait-until (:< (:reflection))))))) "")))
+  (check "a reading is of a sensor the robot has"
+         (search "no force sensor"
+                 (or (refusal #'(lambda () (run-program (test-robot *robot-build*)
+                                                        (checked-program '((:wait-until (:pressed))))
+                                                        :table (bare-table))))
+                     "")))
+  (let ((text (pybricks-program (test-robot *sensor-build*)
+                                (checked-program (read-program "(drive 150 0) (wait-until (or (< (reflection) 30) (= (color) red))) (stop) (repeat 2 (straight 100) (turn 90)) (follow-line :until (pressed) :gain 0.8) (wait-until (< (distance) 200))")))))
+    (dolist (line '("from pybricks.parameters import Color, Direction, Port"
+                    "from pybricks.pupdevices import Motor, ColorSensor, ForceSensor, UltrasonicSensor"
+                    "distance_sensor = UltrasonicSensor(Port.C)"
+                    "color_sensor = ColorSensor(Port.D)"
+                    "force_sensor = ForceSensor(Port.E)"
+                    "while not ((color_sensor.reflection() < 30 or color_sensor.color() == Color.RED)):"
+                    "for i in range(2):"
+                    "    drive_base.straight(100)"
+                    "while not (force_sensor.pressed()):"
+                    "    drive_base.drive(100, (color_sensor.reflection() - 50) * 0.8)"
+                    "while not (distance_sensor.distance() < 200):"))
+      (check (format nil "Python: ~a" line) (search line text) text))))
+
 (defun fingerprint ()
   "Where a long run leaves everything, for comparing one Lisp with another."
   (let ((result (run-program (test-robot *arm-build*)
                              (checked-program (read-program "(turn 21) (straight 547) (turn -21) (arm -25) (straight 600) (arm 25) (arc -400 :angle 60) (straight -300)")))))
     (list (getf result :robot) (getf result :heading) (getf result :seconds)
-          (mapcar #'(lambda (p) (getf p :at)) (getf result :pieces)))))
+          (mapcar #'(lambda (p) (getf p :at)) (getf result :pieces))
+          (sensor-test "(straight 300) (follow-line :until (> (driven) 1200)) (turn 90) (drive 150 0) (wait-until (or (pressed) (< (distance) 120))) (stop)"))))
 
 (defun run-tests ()
   (setf *checks* nil)
@@ -149,6 +209,7 @@
   (test-pieces)
   (test-refusals)
   (test-pybricks)
+  (test-sensors)
   (format t "~&fingerprint ~s~%" (fingerprint))
   (let ((failed (count nil *checks* :key #'second)))
     (format t "~&~a passed, ~a failed~%" (- (length *checks*) failed) failed)

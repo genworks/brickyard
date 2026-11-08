@@ -408,6 +408,52 @@ pin/pin/pin one with four pins standing up and down.")
           :display-controls (list :color :black))))
 
 
+(define-object color-sensor (part-mixin)
+  :documentation (:description "A color sensor: a body a brick high, its lens in the middle of its underside, looking down.")
+
+  :objects
+  ((body :type 'box
+         :width 15.8 :length 15.8 :height 9.6
+         :center (the (local-point '(0 0 12)))
+         :display-controls (the display-controls))
+   (lens :type 'cylinder
+         :radius 3.2 :length 0.6
+         :center (the (local-point '(0 0 0) :up -0.3))
+         :orientation (alignment :rear (the (local-direction '(0 0 1))))
+         :display-controls (list :color :black))))
+
+
+(define-object distance-sensor (part-mixin)
+  :documentation (:description "A distance sensor: a body a brick high with two round eyes in its :rear face.")
+
+  :objects
+  ((body :type 'box
+         :width 31.8 :length 7.8 :height 9.6
+         :center (the (local-point '(0 0 12)))
+         :display-controls (the display-controls))
+   (eyes :type 'cylinder
+         :sequence (:size 2)
+         :radius 3.6 :length 1.2
+         :center (the (local-point (list (if (zerop (the-child index)) -16 16) 10 12) :up 0))
+         :orientation (alignment :rear (the (local-direction '(0 1 0))))
+         :display-controls (list :color :black))))
+
+
+(define-object force-sensor (part-mixin)
+  :documentation (:description "A force sensor: a body a brick high and a button standing out of its :rear face.")
+
+  :objects
+  ((body :type 'box
+         :width 15.8 :length 15.8 :height 9.6
+         :center (the (local-point '(0 0 12)))
+         :display-controls (the display-controls))
+   (button :type 'cylinder
+           :radius 4.0 :length 6.4
+           :center (the (local-point '(0 28 12)))
+           :orientation (alignment :rear (the (local-direction '(0 1 0))))
+           :display-controls (list :color :black))))
+
+
 (defun part-class (spec)
   (ecase (spec-type spec)
     ((:brick :plate :tile :technic-brick) 'brick)
@@ -427,6 +473,9 @@ pin/pin/pin one with four pins standing up and down.")
     (:gear 'gear)
     (:motor 'motor)
     (:controller 'controller)
+    (:color-sensor 'color-sensor)
+    (:distance-sensor 'distance-sensor)
+    (:force-sensor 'force-sensor)
     ((:bent-beam :cheese-slope :split-cross-block :triple-cross-block :axle-hub :hole-axle :stud-axle
       :axle-connector :twin-cross-block :axle-beam :h-beam :cross-pin :pin-axle)
      'boxed-part)))

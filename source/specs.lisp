@@ -52,14 +52,16 @@ still pull the part onto it (three studs).")
     :pin-block :grey :axle-block :grey :t-beam :grey-light :round-plate :white :rim :grey-light :tyre :black
     :bent-beam :grey-light :cheese-slope :white :split-cross-block :grey :triple-cross-block :grey
     :axle-hub :grey :hole-axle :grey :stud-axle :grey :axle-connector :black :stop-axle :grey
-    :twin-cross-block :grey :axle-beam :grey-light :h-beam :grey-light :cross-pin :black :pin-axle :blue))
+    :twin-cross-block :grey :axle-beam :grey-light :h-beam :grey-light :cross-pin :black :pin-axle :blue
+    :color-sensor :white :distance-sensor :white :force-sensor :white))
 
 (defparameter *part-types*
   '(:brick :plate :tile :technic-brick :beam :axle :pin :wheel :motor :controller :gear :half-pin :axle-pin
     :bush :cross-block :l-beam :round-tile :angle-connector :axle-joiner :pin-joiner :stop-pin
     :hole-pin :pin-block :axle-block :t-beam :round-plate :rim :tyre
     :bent-beam :cheese-slope :split-cross-block :triple-cross-block :axle-hub :hole-axle :stud-axle
-    :axle-connector :stop-axle :twin-cross-block :axle-beam :h-beam :cross-pin :pin-axle)
+    :axle-connector :stop-axle :twin-cross-block :axle-beam :h-beam :cross-pin :pin-axle
+    :color-sensor :distance-sensor :force-sensor)
   "List of every part type Brickyard has.")
 
 (defun mm (ldu) (* ldu *mm-per-ldu*))
@@ -169,7 +171,7 @@ brick family, (n) for beams and axles, () for a pin."
       ((:half-pin :bush :round-tile :motor :controller :pin-joiner :stop-pin :hole-pin
         :pin-block :axle-block :t-beam :round-plate :rim :tyre :bent-beam :cheese-slope
         :split-cross-block :triple-cross-block :axle-hub :stud-axle :axle-connector :twin-cross-block
-        :axle-beam :h-beam :cross-pin :pin-axle)
+        :axle-beam :h-beam :cross-pin :pin-axle :color-sensor :distance-sensor :force-sensor)
        nil))))
 
 (defun move-spec (spec at)
@@ -237,6 +239,13 @@ from it toward :front, 157.5 and 112.5 degrees off, as the library has them."
 ;; :controller    a body 4 by 6 studs and two bricks high, sockets below,
 ;;                studs on its two end rows, a screen and four ports, and
 ;;                a row of pin holes into each long side
+;; :color-sensor  a body 2 by 2 studs and a brick high, studs on top to
+;;                hang under a plate, two pin holes across, and its lens in
+;;                the middle of its underside, looking down
+;; :distance-sensor  a body 4 by 1 studs and a brick high, studs on top,
+;;                sockets below, its two eyes in its :rear face
+;; :force-sensor  a body 2 by 2 studs and a brick high, studs on top,
+;;                sockets below, a button standing out of its :rear face
 ;;
 
 (defun local-connectors (spec)
@@ -400,7 +409,16 @@ from it toward :front, 157.5 and 112.5 degrees off, as the library has them."
        (append (grid-connectors :stud 4 6 48 '(0 0 1) :rows '(0 5))
                (grid-connectors :socket 4 6 0 '(0 0 -1))
                (hole-row :pin-hole -30 (mapcar #'(lambda (j) (row-offset j 6)) (iota 6)) 24 '(1 0 0) 10)
-               (hole-row :pin-hole 30 (mapcar #'(lambda (j) (row-offset j 6)) (iota 6)) 24 '(1 0 0) 10))))))
+               (hole-row :pin-hole 30 (mapcar #'(lambda (j) (row-offset j 6)) (iota 6)) 24 '(1 0 0) 10)))
+      (:color-sensor
+       (append (grid-connectors :stud 2 2 24 '(0 0 1))
+               (hole-row :pin-hole 0 '(-10 10) 12 '(1 0 0) 20)))
+      (:distance-sensor
+       (append (grid-connectors :stud 4 1 24 '(0 0 1))
+               (grid-connectors :socket 4 1 0 '(0 0 -1))))
+      (:force-sensor
+       (append (grid-connectors :stud 2 2 24 '(0 0 1))
+               (grid-connectors :socket 2 2 0 '(0 0 -1)))))))
 
 (defun local-extent (spec)
   "List of two corners, low and high, of the part's own box in LDU, studs left out."
@@ -452,7 +470,11 @@ from it toward :front, 157.5 and 112.5 degrees off, as the library has them."
       (:gear (let ((r (+ (pitch-radius (first size)) 5/2)))
                (list (list (- r) -10 (- r)) (list r 10 r))))
       (:motor (list '(-20 -40 0) '(20 60 48)))
-      (:controller (list '(-40 -60 0) '(40 60 48))))))
+      (:controller (list '(-40 -60 0) '(40 60 48)))
+      (:color-sensor (list '(-20 -20 0) '(20 20 24)))
+      (:distance-sensor (list '(-40 -10 0) '(40 10 24)))
+      ;; the button stands out of the :rear face
+      (:force-sensor (list '(-20 -20 0) '(20 36 24))))))
 
 (defun world-connectors (spec)
   (let ((rows (spec-rotation spec)) (at (spec-at spec)))

@@ -55,7 +55,8 @@
     (:crate :half 32 :grams 60 :restitution 0.1d0 :drag 3900d0 :spin-drag 60d0 :color (0.6 0.42 0.25)))
   "List of (kind properties): what can be pushed about.  Drag is what the floor takes off, mm/s/s.")
 
-(defparameter *part-grams* '((:motor . 60) (:controller . 180))
+(defparameter *part-grams* '((:motor . 60) (:controller . 180) (:color-sensor . 15)
+                              (:distance-sensor . 20) (:force-sensor . 15))
   "List of (type . grams). A typical part of that type, for the parts that are not plastic.")
 
 (defparameter *hollow* 0.45d0
@@ -124,12 +125,61 @@ of mass from the pivot, and load the torque what it met put on it."
   (kilograms 0d0 :type double-float) (inertia 0d0 :type double-float)
   center balls (load 0d0 :type double-float) (blocked nil))
 
+(defstruct sensor
+  "A sensor on the robot: kind its part type, id its part's; x y z where
+it senses from, x y from the center of mass and z above the mat, and dx
+dy dz the way it looks, all in the robot's own frame, millimeters."
+  kind id x y z dx dy dz)
+
 (defstruct robot
   "A build ready for the table.  forward is the way it faces in its own
 frame; center x y and lift, in millimeters, say how the page places it.
 fixed is the shapes that do not move on it.  track and wheel-diameter are
 a drive base's, millimeters; track is nil without a wheel motor each side."
-  rigid treads drives arms fixed center lift forward track wheel-diameter)
+  rigid treads drives arms fixed center lift forward track wheel-diameter sensors)
+
+(defparameter *sensor-faces*
+  '((:color-sensor (0 0 0) (0 0 -1))
+    (:distance-sensor (0 10 12) (0 1 0))
+    (:force-sensor (0 36 12) (0 1 0)))
+  "List of (type point direction): where each sensor senses from and the way it looks, in its own LDU.")
+
+(defun sensor-of (spec center lowest)
+  (destructuring-bind (point dir) (rest (assoc (spec-type spec) *sensor-faces*))
+    (let ((rows (spec-rotation spec)))
+      (destructuring-bind (x y z) (mapcar #'mm (v+ (spec-at spec) (rotate rows point)))
+        (destructuring-bind (dx dy dz) (mapcar #'(lambda (v) (float v 1d0)) (rotate rows dir))
+          (make-sensor :kind (spec-type spec) :id (spec-id spec)
+                       :x (float (- x (first center)) 1d0) :y (float (- y (second center)) 1d0)
+                       :z (float (- z (mm lowest)) 1d0) :dx dx :dy dy :dz dz))))))
+
+(defun mat-color (table x y)
+  "The color printed on the mat at x y: the rings over the print over the mat itself."
+  (or (loop for (nil cx cy radius color) in (getf table :rings)
+            for r = (sqrt (+ (expt (- x cx) 2) (expt (- y cy) 2)))
+            when (<= (* 0.8d0 radius) r radius) return color)
+      (loop for (px py w d color) in (reverse (getf table :print))
+            when (and (<= px x (+ px w)) (<= py y (+ py d))) return color)
+      '(0.94 0.94 0.9)))
+
+(defun color-name (rgb)
+  "What a color sensor calls rgb, of the colors Pybricks' color() reports
+unless told otherwise: red, yellow, green, blue, white, or none.  Black
+is none: too dark to be a color."
+  (destructuring-bind (r g b) rgb
+    (let* ((top (max r g b)) (low (min r g b))
+           (saturation (if (plusp top) (/ (- top low) top) 0))
+           (hue (cond ((= top low) 0)
+                      ((= top r) (mod (* 60 (/ (- g b) (- top low))) 360))
+                      ((= top g) (+ 120 (* 60 (/ (- b r) (- top low)))))
+                      (t (+ 240 (* 60 (/ (- r g) (- top low))))))))
+      (cond ((< top 0.25) :none)
+            ((< saturation 0.3) (if (> top 0.6) :white :none))
+            ((or (< hue 25) (>= hue 330)) :red)
+            ((< hue 75) :yellow)
+            ((< hue 170) :green)
+            ((< hue 260) :blue)
+            (t :none)))))
 
 (defun part-grams (spec)
   (or (cdr (assoc (spec-type spec) *part-grams*))
@@ -355,7 +405,10 @@ built, for a part that moves.  Thin parts take a few larger balls."
                                      :treads treads :drives drives :arms arms :fixed shapes
                                      :center center :forward (list fx fy)
                                      :lift (- (mm lowest))
-                                     :wheel-diameter (* 2 (tread-radius (first driven))))))
+                                     :wheel-diameter (* 2 (tread-radius (first driven)))
+                                     :sensors (loop for spec in stays
+                                                    when (assoc (spec-type spec) *sensor-faces*)
+                                                      collect (sensor-of spec center lowest)))))
               ;; the drive base's track: from the left wheels' middle to the right's
               (flet ((across (side)
                        (let ((treads (remove side driven :key #'(lambda (tr) (drive-side (tread-drive tr)))

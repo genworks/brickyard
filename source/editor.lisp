@@ -56,7 +56,8 @@ run inside.  Empty until prompting opens the box (api.lisp).")
      (:axle-joiner (2)) (:axle-joiner (3)) (:pin-joiner nil)
      (:axle-hub nil) (:axle-connector nil) (:cross-pin nil) (:pin-axle nil))
     ("Robot" (:wheel (3 1)) (:wheel (4 2)) (:wheel (5 2)) (:wheel (7 3)) (:rim nil) (:tyre nil)
-     (:motor nil) (:controller nil)))
+     (:motor nil) (:controller nil))
+    ("Sensors" (:color-sensor nil) (:distance-sensor nil) (:force-sensor nil)))
   "List of (heading (type size) ...) for the page's parts bin.")
 
 (defparameter *colors*
@@ -196,6 +197,7 @@ nil when there is none."
     (:axle-pin (if (eql (first size) 2) "Axle-pin 2" "Axle-pin"))
     (:cross-block (format nil "Cross 1x~a" (first size)))
     (:motor "Motor") (:controller "Controller")
+    (:color-sensor "Color sensor") (:distance-sensor "Distance sensor") (:force-sensor "Force sensor")
     (t (format nil "~:[~;~:*~a ~]~{~a~^x~}"
                (case type (:beam "Beam") (:axle "Axle") (:technic-brick "Tech") (:wheel "Wheel") (:gear "Gear"))
                size))))
@@ -416,6 +418,7 @@ nil when there is none."
        (:a :href "/brickyard?new=1" "New build")
        (:a :href "/brickyard?new=robot" "Robot build")
        (:a :href "/brickyard?new=arm" "Arm robot")
+       (:a :href "/brickyard?new=sensors" "Sensor robot")
        (:a :href "/brickyard?new=gearbox" "Gearbox")
        (:a :href "/brickyard?new=empty" "Empty build")
        (:a :href (format nil "/brickyard/export?b=~a" build-id) :id "export" "Export LDraw")
@@ -522,6 +525,7 @@ an empty group the parts go into."
                                        (make-build :specs (cond ((string= new "empty") nil)
                                                                 ((string= new "robot") *robot-build*)
                                                                 ((string= new "arm") *arm-build*)
+                                                                ((string= new "sensors") *sensor-build*)
                                                                 ((string= new "gearbox") *gearbox-build*)
                                                                 (t *sample-build*)))))))
           ((and id (bt:with-lock-held (*builds-lock*) (find-build id)))

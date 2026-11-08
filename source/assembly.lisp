@@ -44,6 +44,15 @@ wheel on an axle, the controller on top, and a skid at the front.")
   "List of specs. The drive base with a third motor on the controller: it
 swings a long beam out in front, up over what is on the mat or down to sweep it.")
 
+(defparameter *sensor-build*
+  (append *robot-build*
+          '((:type :distance-sensor :at (0 50 104))
+            (:type :color-sensor :at (-80 40 24))
+            (:type :force-sensor :at (80 40 24))))
+  "List of specs. The drive base with a distance sensor on the controller
+looking ahead, a color sensor under the plate looking down, and a force
+sensor's button out in front.")
+
 (defparameter *gearbox-build*
   '((:type :technic-brick :size (8) :at (-30 0 0))
     (:type :technic-brick :size (8) :at (30 0 0))
