@@ -10,7 +10,8 @@
   (:export #:assembly #:*sample-build*
            #:world-connectors #:world-extent #:connections #:collisions
            #:snap-spec #:to-ldraw #:gate #:private-beta #:prompting
-           #:mint-invite! #:revoke-invite! #:invites-report))
+           #:mint-invite! #:revoke-invite! #:invites-report
+           #:*admins* #:keep-activity!))
 
 (defpackage :brickyard-api
   (:use :common-lisp)

@@ -251,6 +251,22 @@ The link sets a cookie and opens the editor; every page and call under
 style stay open).  Without a roster the gate is open, and without
 `invite-gate` there is none.
 
+The operator's page, `/brickyard/admin`, shows who has an invite and how
+often they used it, what each visitor did (visits, changes, runs on the
+table, prompts, exports, imports, build by build), and the builds in
+memory with their prompts and the model's answers; it deletes from the
+record a line, or everything kept of a visitor, when asked.  The record
+is Gendl's `visitor-log`, one file a visitor, kept only once the
+operator names a directory: keeping what visitors do is the operator's
+decision, and something the visitors should be told.  Only an invite
+name on `*admins*` sees the page; anyone else is told there is no such
+page.
+
+```lisp
+(brickyard:keep-activity! "/path/to/brickyard-activity/")
+(setf brickyard:*admins* '("Name on my invite"))
+```
+
 The page is X_ITE, an X3D browser: each part is its own Transform with
 a PlaneSensor, so dragging runs in the browser and only the release
 goes to the server, which answers with the parts that changed.

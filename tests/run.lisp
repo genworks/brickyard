@@ -9,7 +9,8 @@
 ;;
 ;; Brickyard's checks of the table: the robot drives where its program
 ;; says, pushes what it meets, and writes the same program out for a real
-;; hub.  Load Brickyard, then this file, then (brickyard::run-tests),
+;; hub; and of the admin page, over a real connection, when Gendl's
+;; visitor-log is at hand.  Load Brickyard, then this file, then (brickyard::run-tests),
 ;; which prints a line a check and answers (passed failed).  Nothing here
 ;; is particular to one Lisp: the same numbers should come out of each.
 ;;
@@ -253,6 +254,147 @@
       (check "the sample program scores 20: two balls in the red ring" (= 20 (run-score result *table*))
              (run-score result *table*)))))
 
+(defun visitor-log-p ()
+  "Whether Gendl's invite-gate and visitor-log are here, each loaded
+from INVITE_GATE_FILE or VISITOR_LOG_FILE, or from a Gendl checkout
+beside this one, when the image is older than it."
+  (flet ((here (package variable name)
+           (or (find-package package)
+               (let ((file (or (uiop:getenv variable)
+                               (uiop:merge-pathnames* (format nil "../gendl/gwl/source/~a.lisp" name)
+                                                      (uiop:pathname-parent-directory-pathname
+                                                       (truename *static-directory*))))))
+                 (when (probe-file file) (load file) t)))))
+    (and (here :invite-gate "INVITE_GATE_FILE" "invite-gate")
+         (here :visitor-log "VISITOR_LOG_FILE" "visitor-log"))))
+
+(defun free-port ()
+  (let ((socket (usocket:socket-listen "127.0.0.1" 0)))
+    (prog1 (usocket:get-local-port socket) (usocket:socket-close socket))))
+
+(defun test-admin ()
+  "The activity log and the admin page over a real connection, behind a
+gate with two invites, one of them an admin's."
+  (if (not (visitor-log-p))
+      (format t "~&skip the admin page: no invite-gate or visitor-log here~%")
+      (let* ((port (free-port))
+             (server (net.aserve:start :port port :server :new :listeners 2 :host "127.0.0.1"))
+             (stamp (get-universal-time))
+             (roster (format nil "/tmp/brickyard-admin-roster-~d.sexp" stamp))
+             (dir (format nil "/tmp/brickyard-admin-~d/" stamp))
+             (old (list *gate* *activity* *admins*))
+             (made '()))
+        (labels ((ask (token path &key content (type "application/x-www-form-urlencoded"))
+                   (multiple-value-bind (body code headers)
+                       (net.aserve.client:do-http-request
+                        (format nil "http://127.0.0.1:~d~a~@[~a~]" port path
+                                (and token (format nil "~:[?~;&~]invite=~a" (search "?" path) token)))
+                        :method (if content :post :get) :content content :content-type type :redirect nil)
+                     (list code (if (stringp body) body (map 'string #'code-char body))
+                           (cdr (assoc :location headers)))))
+                 (code (token path) (first (ask token path)))
+                 (json (token path) (yason:parse (second (ask token path))))
+                 (kept () (length (vlog :lines *activity* "Bob")))
+                 (written (n)
+                   ;; a line is written once its door has answered
+                   (loop repeat 100 until (>= (kept) n) do (sleep 0.02)))
+                 (del (body &optional (type "application/json"))
+                   (ask "alicetoken" "/brickyard/api/admin/delete" :content body :type type)))
+          (unwind-protect
+               (progn
+                 (with-open-file (out roster :direction :output :if-exists :supersede)
+                   (format out "~s~%~s~%" '("alicetoken" "Alice" "2026-11-09") '("bobtoken" "Bob" "2026-11-09")))
+                 ;; set globally, since the doors run in the server's threads
+                 (setf *gate* (uiop:symbol-call :invite-gate :make-gate :name "Brickyard" :prefix "/brickyard"
+                                                :cookie "brickyard_invite" :invites-file roster)
+                       *activity* nil
+                       *admins* '("Alice"))
+                 (keep-activity! dir)
+                 (publish-brickyard server)
+                 (publish-admin server)
+                 ;; Bob makes a build, opens it, asks its state, adds a
+                 ;; brick, opens the table, runs a program and imports a file
+                 (let* ((id (let ((to (third (ask "bobtoken" "/brickyard?new=empty"))))
+                              (subseq to (1+ (search "=" to)))))
+                        (form #'(lambda (&rest pairs) (format nil "b=~a~{&~a=~a~}" id pairs))))
+                   (push id made)
+                   (ask "bobtoken" (format nil "/brickyard?b=~a" id))
+                   (ask "bobtoken" "/brickyard/api" :content (funcall form "op" "state"))
+                   (ask "bobtoken" "/brickyard/api" :content (funcall form "op" "add" "type" "brick" "size" "2+4" "at" "0+0+0"))
+                   (ask "bobtoken" "/brickyard/api/table" :content (funcall form "action" "open"))
+                   (ask "bobtoken" "/brickyard/api/table" :content (funcall form "action" "run" "program" "%28straight+100%29"))
+                   (push (gethash "build" (yason:parse (second (ask "bobtoken" "/brickyard/import" :type "text/plain"
+                                                                    :content (format nil "0 test~%1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat~%")))))
+                         made)
+                   (written 5)
+                   (let ((lines (vlog :lines *activity* "Bob")))
+                     (check "the activity log keeps what a visitor did, not the page asking what it shows"
+                            (equal (mapcar #'line-kind lines) '(:visit :visit :change :table :import))
+                            (mapcar #'line-kind lines))
+                     (check "no invite token is written in the log"
+                            (notany #'(lambda (line) (search "token" (prin1-to-string line))) lines)))
+                   (check "anyone but an admin, invited or not, is told there is no such page"
+                          (and (every #'(lambda (door) (eql 404 (code "bobtoken" door)))
+                                      '("/brickyard/admin" "/brickyard/admin.js" "/brickyard/api/admin"
+                                        "/brickyard/api/admin/visitor?who=Bob"))
+                               (eql 403 (code nil "/brickyard/api/admin"))))
+                   (check "an admin gets the page and its script"
+                          (and (search "/brickyard/admin.js?v=" (second (ask "alicetoken" "/brickyard/admin")))
+                               (search "/brickyard/api/admin" (second (ask "alicetoken" "/brickyard/admin.js")))))
+                   (let* ((text (second (ask "alicetoken" "/brickyard/api/admin")))
+                          (summary (yason:parse text))
+                          (row (find "Bob" (gethash "visitors" summary) :key #'(lambda (row) (gethash "name" row))
+                                     :test #'equal)))
+                     (check "the summary counts each visitor's visits, changes, runs and imports, and their builds"
+                            (and row (equal (mapcar #'(lambda (key) (gethash key row)) '("visits" "changes" "runs" "imports"))
+                                            '(2 1 1 1))
+                                 (equal (map 'list #'(lambda (build) (gethash "id" build)) (gethash "builds" row))
+                                        (list id)))
+                            (and row (alexandria:hash-table-plist row)))
+                     (check "no invite token is in the summary" (not (search "token" text))))
+                   (check "the admin's own looking leaves no line" (null (vlog :lines *activity* "Alice")))
+                   (let ((timeline (json "alicetoken" "/brickyard/api/admin/visitor?who=Bob")))
+                     (check "a visitor's lines, with the program run and the file imported"
+                            (let ((events (gethash "events" timeline)))
+                              (and (= 5 (gethash "total" timeline))
+                                   (equal "(straight 100)" (gethash "program" (fourth events)))
+                                   (search "3001.dat"
+                                           (second (ask "alicetoken" (format nil "/brickyard/api/admin/file?who=Bob&file=~a"
+                                                                             (gethash "file" (fifth events)))))))))
+                     (check "nothing outside the log can be named"
+                            (every #'(lambda (path) (eql 500 (code "alicetoken" path)))
+                                   '("/brickyard/api/admin/visitor?who=..%2FBob"
+                                     "/brickyard/api/admin/file?who=Bob&file=..%2F..%2Fetc%2Fpasswd"
+                                     "/brickyard/api/admin/file?who=Alice&file=x")))
+                     (let ((line (elt (gethash "events" timeline) 2)))
+                       (check "a delete takes only a POST of JSON, and a line only where it still is"
+                              (and (eql 500 (first (del "who=Bob&everything=true" "application/x-www-form-urlencoded")))
+                                   (eql 500 (first (del (format nil "{\"who\":\"Bob\",\"line\":~a,\"mark\":\"x\"}"
+                                                                (gethash "line" line)))))
+                                   (= 5 (kept))))
+                       (check "one line deleted"
+                              (and (eql 200 (first (del (format nil "{\"who\":\"Bob\",\"line\":~a,\"mark\":\"~a\"}"
+                                                                (gethash "line" line) (gethash "mark" line)))))
+                                   (= 4 (kept))))))
+                   (check "everything kept of a visitor deleted, the file they imported with it"
+                          (and (eql 200 (first (del "{\"who\":\"Bob\",\"everything\":true}")))
+                               (= 0 (kept))
+                               (null (directory (merge-pathnames "**/*.*" dir)))))
+                   (setf *admins* nil)
+                   (check "with no admin named, there is no page for anyone"
+                          (eql 404 (code "alicetoken" "/brickyard/api/admin")))
+                   (setf *admins* t)
+                   (check "with *admins* t, anyone the gate admits" (eql 200 (code "bobtoken" "/brickyard/api/admin")))))
+            (net.aserve:shutdown :server server)
+            (destructuring-bind (gate activity admins) old
+              (setf *gate* gate *activity* activity *admins* admins))
+            (ignore-errors (delete-file roster))
+            (ignore-errors (uiop:delete-directory-tree (uiop:ensure-directory-pathname dir) :validate t))
+            (dolist (id made)
+              (when id
+                (bt:with-lock-held (*builds-lock*) (remhash id *builds*))
+                (ignore-errors (delete-file (build-file id))))))))))
+
 (defun fingerprint ()
   "Where a long run leaves everything, for comparing one Lisp with another."
   (let ((result (run-program (test-robot *arm-build*)
@@ -274,6 +416,7 @@
   (test-sensors)
   (test-spike)
   (test-missions)
+  (test-admin)
   (format t "~&fingerprint ~s~%" (fingerprint))
   (let ((failed (count nil *checks* :key #'second)))
     (format t "~&~a passed, ~a failed~%" (- (length *checks*) failed) failed)

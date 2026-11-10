@@ -690,17 +690,20 @@ connection, and the reset can reach the client ahead of the reply."
                     (yason:encode (json-object :ok nil :message (format nil "That is more than Brickyard takes here (~:d bytes)." limit))
                                   s))))
 
-(defun gated (handler &key (limit *body-limit*))
+(defun gated (handler &key (limit *body-limit*) (note? t))
   "A publish function that answers through handler only a body within
 limit, and only what the gate admits.  The size comes first: asking
-the gate looks for ?invite=, and looking reads a form-encoded body."
+the gate looks for ?invite=, and looking reads a form-encoded body.
+With note?, what was answered goes in the activity log (admin.lisp)."
   #'(lambda (req ent)
       (let ((gate (gate)))
         (cond ((not (body-within-p req limit)) (refuse-body req ent limit))
               ((and gate (not (uiop:symbol-call :invite-gate :invite-allowed? gate req)))
                (refuse-visitor req ent))
               (t (when gate (uiop:symbol-call :invite-gate :ensure-invite-cookie! gate req))
-                 (funcall handler req ent))))))
+                 (funcall handler req ent)
+                 ;; named: defined in admin.lisp, after this file
+                 (when note? (funcall 'note-activity! req)))))))
 
 (defun publish-invite-door (server)
   "Publish /brickyard/invite/<token>.  The door is a link, so it answers
