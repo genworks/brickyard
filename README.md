@@ -256,7 +256,8 @@ often they used it, what each visitor did (visits, changes, runs on the
 table, prompts, exports, imports, build by build), and the builds in
 memory with their prompts and the model's answers; it deletes from the
 record a line, or everything kept of a visitor, when asked.  The record
-is Gendl's `visitor-log`, one file a visitor, kept only once the
+is Gendl's `visitor-log`, which also gives the page its look and the
+pieces its script is built from; one file a visitor, kept only once the
 operator names a directory: keeping what visitors do is the operator's
 decision, and something the visitors should be told.  Only an invite
 name on `*admins*` sees the page; anyone else is told there is no such

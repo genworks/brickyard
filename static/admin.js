@@ -12,7 +12,9 @@
 // activity log what its operator asks it to, each time after asking
 // back: one line, or everything kept of a visitor.  Everything shown
 // here that a visitor typed -- a prompt, a program, a request's body --
-// goes into the page as text, never as markup.
+// goes into the page as text, never as markup.  The pieces it is built
+// from (elements, fetching, times, pills, the delete button) are
+// window.visitorAdmin, Gendl's visitor-log's, which the page loads first.
 
 (function () {
   'use strict';
@@ -22,71 +24,11 @@
   var limits = {};   // visitor key -> how many lines to ask for
   var EVENTS = 300;
 
-  function el(tag, attrs, kids) {
-    var e = document.createElement(tag);
-    Object.keys(attrs || {}).forEach(function (k) {
-      if (k === 'text') e.textContent = attrs[k]; else e.setAttribute(k, attrs[k]);
-    });
-    (kids || []).forEach(function (k) {
-      if (k) e.appendChild(typeof k === 'string' ? document.createTextNode(k) : k);
-    });
-    return e;
-  }
-
-  function fill(e, kids) {
-    e.textContent = '';
-    kids.forEach(function (k) {
-      if (k) e.appendChild(typeof k === 'string' ? document.createTextNode(k) : k);
-    });
-  }
-
-  function answer(r) {
-    if (!r.ok) return r.text().then(function (t) { throw new Error(r.status + ' ' + t.slice(0, 300)); });
-    return r.json();
-  }
-
-  function get(path) {
-    return fetch(path, { credentials: 'same-origin', cache: 'no-store' }).then(answer);
-  }
-
-  function post(path, body) {
-    return fetch(path, { method: 'POST', credentials: 'same-origin', cache: 'no-store',
-                         headers: { 'Content-Type': 'application/json' },
-                         body: JSON.stringify(body) }).then(answer);
-  }
-
-  function when(iso) {
-    var d = iso ? new Date(iso) : null;
-    if (!d) return '';
-    if (isNaN(d.getTime())) return String(iso);
-    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  }
-
-  function ago(iso) {
-    var d = iso ? new Date(iso) : null;
-    if (!d || isNaN(d.getTime())) return '';
-    var s = Math.max(0, Math.round((Date.now() - d.getTime()) / 1000));
-    if (s < 90) return s + ' s ago';
-    if (s < 5400) return Math.round(s / 60) + ' min ago';
-    if (s < 129600) return Math.round(s / 3600) + ' h ago';
-    return Math.round(s / 86400) + ' days ago';
-  }
-
-  function count(n, one, many) {
-    return n + ' ' + (n === 1 ? one : (many || one + 's'));
-  }
-
-  function pill(text, kind) {
-    return el('span', { 'class': 'ad-pill' + (kind ? ' ad-' + kind : ''), text: text });
-  }
-
-  function fact(label, value, kind) {
-    return el('span', kind ? { 'class': 'ad-' + kind } : {}, [label + ' ', el('b', { text: String(value) })]);
-  }
-
-  function more(label, text) {
-    return el('details', { 'class': 'ad-more' }, [el('summary', { text: label }), el('pre', { 'class': 'ad-mono', text: text })]);
-  }
+  // What every operator's page is built from, served by
+  // /brickyard/admin-kit.js (Gendl's visitor-log).
+  var A = window.visitorAdmin;
+  var el = A.el, fill = A.fill, get = A.get, when = A.when, ago = A.ago, count = A.count,
+      pill = A.pill, fact = A.fact, more = A.more;
 
   function buildLink(id) {
     return el('a', { href: '/brickyard?b=' + encodeURIComponent(id), target: '_blank', rel: 'noopener',
@@ -94,18 +36,9 @@
   }
 
   // A button that asks before it deletes, then reloads what it shows.
-  function deleter(label, question, cls, body, after) {
-    var b = el('button', { type: 'button', 'class': cls, text: label, title: question });
-    b.addEventListener('click', function (ev) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      if (!window.confirm(question)) return;
-      b.disabled = true;
-      post('/brickyard/api/admin/delete', body).then(after, function (e) {
-        b.disabled = false;
-        window.alert('Not deleted: ' + e.message);
-      });
-    });
+  function deleter(label, question, kind, body, after) {
+    var b = A.remover('/brickyard/api/admin/delete', label, kind, question, body, after);
+    b.setAttribute('title', question);
     return b;
   }
 
@@ -139,12 +72,10 @@
   }
 
   function lineRow(v, ev, reload) {
-    return el('div', { 'class': 'ad-event' }, [
-      el('span', { 'class': 'ad-time', title: ev.time || '', text: when(ev.time) }),
-      el('span', {}, [pill(LABELS[ev.kind] || ev.kind)]),
-      el('div', { 'class': 'ad-what' }, what(v, ev)),
-      deleter('×', 'Delete this line from ' + (v.name || v.key) + '\'s record?', 'ad-del',
-              { who: v.key, line: ev.line, mark: ev.mark }, reload)]);
+    var row = A.eventRow(ev.time, LABELS[ev.kind] || ev.kind, '', what(v, ev));
+    row.appendChild(deleter('×', 'Delete this line from ' + (v.name || v.key) + '\'s record?', 'del',
+                            { who: v.key, line: ev.line, mark: ev.mark }, reload));
+    return row;
   }
 
   function loadVisitor(v, body) {
@@ -164,7 +95,7 @@
         kids.push(el('p', {}, [deleter('Delete everything kept of ' + (v.name || v.key),
                                        'Delete all ' + count(r.total, 'line') + ' kept of ' + (v.name || v.key) +
                                        ', and any file they imported?  Their invite stays.',
-                                       'ad-danger', { who: v.key, everything: true }, reload)]));
+                                       'danger', { who: v.key, everything: true }, reload)]));
       }
       fill(body, kids);
     }, function (e) {

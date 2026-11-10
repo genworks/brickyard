@@ -27,8 +27,14 @@
 ;;   (brickyard:keep-activity! "/projects/.state/brickyard-activity/")
 ;;   (setf brickyard:*admins* '("Name on my invite"))
 ;;
+;; The page's look and the pieces its script is built from are
+;; visitor-log's too, shared with other applications' admin pages:
+;; static/admin.js holds only what is Brickyard's.
+;;
 ;; Brickyard compiles without visitor-log (an image built before it):
-;; then nothing is kept and there is no admin page.
+;; then nothing is kept and there is no admin page.  With a visitor-log
+;; from before it had the page's pieces, activity is kept and there is
+;; still no page.
 ;;
 
 (defvar *admins* nil
@@ -94,9 +100,15 @@ import keeps the file it brought."
                          ;; AllegroServe's body is its bytes, one a character
                          (map '(vector (unsigned-byte 8)) #'char-code raw))))))
 
+(defun admin-kit-p ()
+  "Whether the visitor-log here has the admin page's own pieces."
+  (and (find-package :visitor-log)
+       (let ((page (uiop:find-symbol* :admin-page :visitor-log nil)))
+         (and page (fboundp page)))))
+
 (defun admin-p (req)
   "Whether REQ's person may see the admin page."
-  (and (find-package :visitor-log)
+  (and (admin-kit-p)
        (vlog :admin? (gate) req *admins*)))
 
 ;;; What is kept, summed up.
@@ -327,73 +339,12 @@ form on someone else's page cannot send."
     (with-output-to-string (s)
       (yason:encode (json-object :deleted (json-object :lines (first gone) :files (second gone))) s))))
 
-(defparameter *admin-css* "
-html, body { margin: 0; background: #1b1d21; color: #d8dbe0;
-  font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
-#admin { max-width: 1100px; margin: 0 auto; padding: 12px 16px 60px; }
-h1 { font-size: 18px; margin: 4px 0; }
-h2 { font-size: 14px; margin: 22px 0 8px; color: #c9cdd3; text-transform: uppercase; letter-spacing: .06em; }
-a { color: #8fb8f0; }
-button { background: #2c2f35; color: inherit; border: 1px solid #3a3e45; border-radius: 4px;
-  padding: 5px 12px; font: inherit; cursor: pointer; }
-button:hover { background: #3b5f93; }
-button:disabled { opacity: .5; cursor: default; }
-button.ad-danger { border-color: #7a3a3a; color: #e0a0a0; }
-button.ad-del { grid-column: 4; grid-row: 1; align-self: start; padding: 0 8px; font-size: 12px;
-  background: none; border-color: transparent; color: #8a9099; }
-button.ad-danger:hover, button.ad-del:hover { background: #7a2e2e; border-color: #7a2e2e; color: #fff; }
-.ad-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.ad-head h1 { flex: 1; }
-.ad-dim { color: #8a9099; }
-.ad-mono { font: 12px/1.45 ui-monospace, Menlo, monospace; }
-.ad-facts { display: flex; flex-wrap: wrap; gap: 4px 16px; color: #9aa0a8; font-size: 13px; }
-.ad-facts b { color: #d8dbe0; font-weight: 600; }
-.ad-warn { color: #e0b070; }
-.ad-card { background: #222429; border: 1px solid #33363c; border-radius: 6px; margin: 8px 0; }
-.ad-card > summary { padding: 9px 12px; cursor: pointer; list-style: none; display: flex;
-  flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
-.ad-card > summary::-webkit-details-marker { display: none; }
-.ad-card > summary::before { content: '\\25b8'; color: #8a9099; }
-.ad-card[open] > summary::before { content: '\\25be'; }
-.ad-card[open] > summary { border-bottom: 1px solid #33363c; }
-.ad-name { font-weight: 600; font-size: 15px; }
-.ad-body { padding: 8px 12px 12px; }
-.ad-pill { display: inline-block; border-radius: 9px; padding: 0 8px; font-size: 11px; line-height: 18px;
-  background: #2c2f35; color: #c9cdd3; border: 1px solid #3a3e45; white-space: nowrap; }
-.ad-pill.ad-live { background: #1f3a2a; border-color: #2f6b45; color: #9fd8b0; }
-.ad-pill.ad-model { background: #1f2b3a; border-color: #3b5f93; color: #a8c8f0; }
-.ad-event { display: grid; grid-template-columns: 140px 78px 1fr auto; gap: 2px 10px; padding: 5px 0;
-  border-top: 1px solid #2c2f35; align-items: baseline; }
-.ad-event > .ad-time { color: #8a9099; font-size: 12px; white-space: nowrap; }
-.ad-what { min-width: 0; overflow-wrap: anywhere; }
-.ad-words { border-left: 3px solid #4a8fe0; background: #1f2b3a; color: #e8eaed; padding: 3px 8px;
-  margin: 3px 0; white-space: pre-wrap; }
-.ad-reply { border-left: 3px solid #8a9099; padding: 3px 8px; margin: 3px 0; white-space: pre-wrap; }
-details.ad-more > summary { cursor: pointer; color: #8a9099; font-size: 12px; }
-details.ad-more > pre { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #c9cdd3;
-  background: #17181b; padding: 6px 8px; border-radius: 3px; max-height: 50vh; overflow: auto; }
-@media (max-width: 640px) {
-  #admin { padding: 10px 12px 60px; }
-  .ad-event { grid-template-columns: 1fr auto auto; }
-  .ad-event > .ad-what { grid-column: 1 / -1; grid-row: 2; }
-  button.ad-del { grid-column: 3; }
-}
-"
-  "The admin page: one column of cards, at a desk or on a phone.")
-
 (defun admin-html ()
-  (cl-who:with-html-output-to-string (s nil :prologue "<!doctype html>")
-    (:html :lang "en"
-     (:head
-      (:meta :charset "utf-8")
-      (:meta :name "viewport" :content "width=device-width, initial-scale=1")
-      (:title "Brickyard admin")
-      (:style (cl-who:str *admin-css*)))
-     (:body
-      (:div :id "admin" "Loading...")
-      (:script :src (format nil "/brickyard/admin.js?v=~a"
-                            (or (ignore-errors (file-write-date (merge-pathnames "admin.js" *static-directory*))) 0))
-               "")))))
+  "The page: visitor-log's, with its script of helpers ahead of ours."
+  (vlog :admin-page "Brickyard admin"
+        (list "/brickyard/admin-kit.js"
+              (format nil "/brickyard/admin.js?v=~a"
+                      (or (ignore-errors (file-write-date (merge-pathnames "admin.js" *static-directory*))) 0)))))
 
 (defun admin-door (content-type fn)
   "A publish function answering FN, a function of the request answering
@@ -420,6 +371,9 @@ tells them.  The admin's own looking leaves no line in the log."
   (flet ((pub (path content-type fn)
            (net.aserve:publish :path path :server server :function (admin-door content-type fn))))
     (pub "/brickyard/admin" "text/html; charset=utf-8" #'(lambda (req) (declare (ignore req)) (admin-html)))
+    (pub "/brickyard/admin-kit.js" "application/javascript; charset=utf-8"
+         #'(lambda (req) (declare (ignore req))
+             (symbol-value (uiop:find-symbol* :*admin-script* :visitor-log))))
     (pub "/brickyard/admin.js" "application/javascript; charset=utf-8"
          #'(lambda (req) (declare (ignore req))
              (uiop:read-file-string (merge-pathnames "admin.js" *static-directory*))))

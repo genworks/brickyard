@@ -255,18 +255,24 @@
              (run-score result *table*)))))
 
 (defun visitor-log-p ()
-  "Whether Gendl's invite-gate and visitor-log are here, each loaded
-from INVITE_GATE_FILE or VISITOR_LOG_FILE, or from a Gendl checkout
-beside this one, when the image is older than it."
-  (flet ((here (package variable name)
-           (or (find-package package)
-               (let ((file (or (uiop:getenv variable)
-                               (uiop:merge-pathnames* (format nil "../gendl/gwl/source/~a.lisp" name)
-                                                      (uiop:pathname-parent-directory-pathname
-                                                       (truename *static-directory*))))))
-                 (when (probe-file file) (load file) t)))))
+  "Whether Gendl's invite-gate and visitor-log are here, the second with
+the admin page's own pieces, each loaded from INVITE_GATE_FILE or
+VISITOR_LOG_FILE, or from a Gendl checkout beside this one, when the
+image is older than it."
+  (flet ((here (package variable name &optional proof)
+           (flet ((have ()
+                    (and (find-package package)
+                         (or (null proof)
+                             (let ((symbol (uiop:find-symbol* proof package nil)))
+                               (and symbol (fboundp symbol)))))))
+             (or (have)
+                 (let ((file (or (uiop:getenv variable)
+                                 (uiop:merge-pathnames* (format nil "../gendl/gwl/source/~a.lisp" name)
+                                                        (uiop:pathname-parent-directory-pathname
+                                                         (truename *static-directory*))))))
+                   (when (probe-file file) (load file) (have)))))))
     (and (here :invite-gate "INVITE_GATE_FILE" "invite-gate")
-         (here :visitor-log "VISITOR_LOG_FILE" "visitor-log"))))
+         (here :visitor-log "VISITOR_LOG_FILE" "visitor-log" :admin-page))))
 
 (defun free-port ()
   (let ((socket (usocket:socket-listen "127.0.0.1" 0)))
@@ -335,12 +341,15 @@ gate with two invites, one of them an admin's."
                             (notany #'(lambda (line) (search "token" (prin1-to-string line))) lines)))
                    (check "anyone but an admin, invited or not, is told there is no such page"
                           (and (every #'(lambda (door) (eql 404 (code "bobtoken" door)))
-                                      '("/brickyard/admin" "/brickyard/admin.js" "/brickyard/api/admin"
+                                      '("/brickyard/admin" "/brickyard/admin-kit.js" "/brickyard/admin.js" "/brickyard/api/admin"
                                         "/brickyard/api/admin/visitor?who=Bob"))
                                (eql 403 (code nil "/brickyard/api/admin"))))
-                   (check "an admin gets the page and its script"
-                          (and (search "/brickyard/admin.js?v=" (second (ask "alicetoken" "/brickyard/admin")))
-                               (search "/brickyard/api/admin" (second (ask "alicetoken" "/brickyard/admin.js")))))
+                   (check "an admin gets the page, the shared pieces it is built from, and its script"
+                          (let ((page (second (ask "alicetoken" "/brickyard/admin"))))
+                            (and (search "/brickyard/admin-kit.js" page)
+                                 (search "/brickyard/admin.js?v=" page)
+                                 (search "visitorAdmin" (second (ask "alicetoken" "/brickyard/admin-kit.js")))
+                                 (search "/brickyard/api/admin" (second (ask "alicetoken" "/brickyard/admin.js"))))))
                    (let* ((text (second (ask "alicetoken" "/brickyard/api/admin")))
                           (summary (yason:parse text))
                           (row (find "Bob" (gethash "visitors" summary) :key #'(lambda (row) (gethash "name" row))
