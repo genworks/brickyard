@@ -1304,6 +1304,40 @@ orientation winning a tie; nil when none snaps within reach."
             (when (or (null best) (< distance best-distance))
               (setf best dropped best-distance distance))))))))
 
+(defun outside-share (spec near)
+  "How much of spec's box lies outside near's, 0 to 1."
+  (destructuring-bind ((a0 a1) (b0 b1)) (list (world-extent spec) (world-extent near))
+    (flet ((volume (low high) (reduce #'* (mapcar #'(lambda (l h) (max 0 (- h l))) low high))))
+      (let ((whole (volume a0 a1)))
+        (if (zerop whole)
+            1
+            (- 1 (/ (volume (mapcar #'max a0 b0) (mapcar #'min a1 b1)) whole)))))))
+
+(defun fit-onto (spec others near start)
+  "Spec, added from the bin with near selected, snapped onto near: as
+fit-spec puts it from start, unless that leaves most of it inside near --
+an axle pushed through a motor, nothing left sticking out for a gear --
+when a snap from either end of each of near's holes and pins that leaves
+more of it outside wins.  Nil when nothing snaps."
+  (flet ((fit (from) (fit-spec (move-spec spec from) others :onto near :reach 10000)))
+    (let ((first (fit start)))
+      (if (or (null first) (>= (outside-share first near) 1/2))
+          first
+          (let* ((extent (world-extent (move-spec spec '(0 0 0))))
+                 (length (reduce #'max (v- (second extent) (first extent))))
+                 (best first)
+                 (best-share (outside-share first near)))
+            (dolist (c (world-connectors near) best)
+              (when (member (connector-kind c) '(:pin-hole :axle-hole :pin :axle))
+                (dolist (sign '(1 -1))
+                  (let ((tried (fit (mapcar #'round (v+ (connector-point c)
+                                                         (mapcar #'(lambda (d) (* sign d (+ (connector-half c) (/ length 2))))
+                                                                 (connector-dir c)))))))
+                    (when tried
+                      (let ((share (outside-share tried near)))
+                        (when (> share best-share)
+                          (setf best tried best-share share)))))))))))))
+
 (defun studless-p (spec)
   "True for a part that joins only by pins, axles and their holes: nothing
 sets which way up it goes, so it may turn to fit where it is dropped."

@@ -278,6 +278,63 @@ image is older than it."
   (let ((socket (usocket:socket-listen "127.0.0.1" 0)))
     (prog1 (usocket:get-local-port socket) (usocket:socket-close socket))))
 
+(defun test-newcomer ()
+  "A student's first build by the bin alone -- a motor, an axle on it, a
+gear on that -- turns when run; and /brickyard with no build named
+reopens the one this browser had open, over a real connection."
+  (let* ((id (bt:with-lock-held (*builds-lock*) (make-build :specs nil)))
+         (assembly (find-build id))
+         (add #'(lambda (type size near)
+                  (operate assembly "add" (list* (cons "type" type) (cons "size" size) (cons "color" "red")
+                                                 (and near (list (cons "near" (princ-to-string near))))))
+                  (the-object assembly part-specs))))
+    (unwind-protect
+         (progn
+           (funcall add "motor" "" nil)
+           (funcall add "axle" "4" 0)
+           (let ((specs (funcall add "gear" "8" 1)))
+             (check "an axle added to a selected motor sticks out of it"
+                    (>= (outside-share (second specs) (first specs)) 1/2)
+                    (world-extent (second specs)))
+             (check "a gear added to that axle goes on it, and the motor turns it"
+                    (and (find-if #'(lambda (c) (and (= 1 (first c)) (= 2 (second c)))) (connections specs))
+                         (find 2 (motion specs) :key #'first))
+                    (connections specs))))
+      (bt:with-lock-held (*builds-lock*) (remhash id *builds*))
+      (ignore-errors (delete-file (build-file id))))
+    (let* ((port (free-port))
+           (server (net.aserve:start :port port :server :new :listeners 2 :host "127.0.0.1"))
+           (old *gate*)
+           (made nil))
+      (flet ((ask (path &optional cookie)
+               (multiple-value-bind (body code headers)
+                   (net.aserve.client:do-http-request (format nil "http://127.0.0.1:~d~a" port path)
+                                                      :redirect nil
+                                                      :headers (and cookie (list (cons :cookie cookie))))
+                 (declare (ignore body))
+                 (list code (cdr (assoc :location headers)) (cdr (assoc :set-cookie headers))))))
+        (unwind-protect
+             (progn
+               (setf *gate* nil)
+               (publish-brickyard server)
+               (let* ((to (second (ask "/brickyard?new=empty")))
+                      (built (subseq to (1+ (search "=" to))))
+                      (page (ask to)))
+                 (setf made built)
+                 (check "a build's page tells the browser to remember it"
+                        (search (format nil "brickyard_last=~a" built) (or (third page) ""))
+                        page)
+                 (check "/brickyard reopens the build the browser remembers, else starts one"
+                        (and (equal (second (ask "/brickyard" (format nil "brickyard_last=~a" built)))
+                                    (format nil "/brickyard?b=~a" built))
+                             (equal (second (ask "/brickyard")) "/brickyard?new=1")
+                             (equal (second (ask "/brickyard" "brickyard_last=nosuch")) "/brickyard?new=1")))))
+          (net.aserve:shutdown :server server)
+          (setf *gate* old)
+          (when made
+            (bt:with-lock-held (*builds-lock*) (remhash made *builds*))
+            (ignore-errors (delete-file (build-file made)))))))))
+
 (defun test-admin ()
   "The activity log and the admin page over a real connection, behind a
 gate with two invites, one of them an admin's."
@@ -425,6 +482,7 @@ gate with two invites, one of them an admin's."
   (test-sensors)
   (test-spike)
   (test-missions)
+  (test-newcomer)
   (test-admin)
   (format t "~&fingerprint ~s~%" (fingerprint))
   (let ((failed (count nil *checks* :key #'second)))

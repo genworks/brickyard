@@ -18,6 +18,7 @@
   let browser, group, selected = null, color = 'red', busy = Promise.resolve();
   let carried = [];                      // ids that move with the selected part, itself excluded
   let shift = false;                     // Shift held: the selected part moves alone
+  let lastStatus = null;                 // the build's status as the server last sent it
 
   document.addEventListener('keydown', function (e) { if (e.key === 'Shift') { shift = true; preview(lastDrag); } });
   document.addEventListener('keyup', function (e) { if (e.key === 'Shift') { shift = false; preview(lastDrag); } });
@@ -359,6 +360,8 @@
   }
 
   function report(status) {
+    lastStatus = status;
+    remember(status.count);
     const lines = [status.count + ' parts, ' + status.joined + ' joined pairs'];
     if (status.collisions.length)
       lines.push(status.collisions.length + ' overlapping: ' + status.collisions.map(function (p) { return p.join('/'); }).join(', '));
@@ -399,10 +402,20 @@
   document.querySelectorAll('#bin .part').forEach(function (button) {
     button.addEventListener('click', function () {
       const args = { type: button.dataset.type, size: button.dataset.size, color: color };
-      if (selected !== null) args.near = selected;
+      const near = selected;
+      if (near !== null) args.near = near;
       api('add', args).then(function () {
         const newest = Math.max.apply(null, Array.from(parts.keys()));
-        if (isFinite(newest)) select(newest);
+        if (!isFinite(newest)) return;
+        select(newest);
+        // say so when it joined nothing: a newcomer sees it sitting there
+        // and cannot tell why Run leaves it be
+        if (lastStatus && parts.size > 1 && lastStatus.loose.indexOf(newest) >= 0) {
+          const part = parts.get(newest), on = near !== null && parts.get(near);
+          say(part.label + ' (' + newest + ') is loose: ' +
+              (on ? 'nothing on ' + on.label + ' (' + near + ') takes it.' : 'select the part it should join first.') +
+              '  Select an axle with room on it, or drag it into place.');
+        }
       });
     });
   });
@@ -560,6 +573,44 @@
       .catch(function (err) { say('The import did not go through: ' + err); });
     e.target.value = '';
   });
+
+  // Your builds: the ones opened in this browser, newest first, kept in
+  // the browser alone (the server keeps each build by its address).
+  const yourBuilds = document.getElementById('your-builds');
+  function storedBuilds() {
+    try { return JSON.parse(localStorage.getItem('brickyard-builds') || '[]'); } catch (e) { return []; }
+  }
+  function remember(count) {
+    const list = storedBuilds().filter(function (b) { return b.id !== buildId; });
+    list.unshift({ id: buildId, count: count, at: Date.now() });
+    try { localStorage.setItem('brickyard-builds', JSON.stringify(list.slice(0, 20))); } catch (e) {}
+    showBuilds();
+  }
+  function showBuilds() {
+    const others = storedBuilds().filter(function (b) { return b.id !== buildId; });
+    yourBuilds.hidden = others.length === 0;
+    yourBuilds.length = 1;
+    others.forEach(function (b) {
+      const day = new Date(b.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      yourBuilds.add(new Option(b.id + ' (' + b.count + ' parts, ' + day + ')', b.id));
+    });
+  }
+  yourBuilds.addEventListener('change', function () {
+    if (yourBuilds.value) location.href = '/brickyard?b=' + encodeURIComponent(yourBuilds.value);
+  });
+  showBuilds();
+
+  // Start here: shown once to a newcomer, and again from the header.
+  const welcome = document.getElementById('welcome');
+  function showWelcome(shown) { welcome.hidden = !shown; }
+  document.getElementById('welcome-open').addEventListener('click', function (e) {
+    e.preventDefault();
+    showWelcome(welcome.hidden);
+  });
+  function welcomed() { try { localStorage.setItem('brickyard-welcomed', '1'); } catch (e) {} }
+  document.getElementById('welcome-close').addEventListener('click', function () { showWelcome(false); welcomed(); });
+  welcome.querySelector('a.button').addEventListener('click', welcomed);
+  try { if (!localStorage.getItem('brickyard-welcomed')) showWelcome(true); } catch (e) { showWelcome(true); }
 
   // Start: the empty world, then every part.
   async function start() {

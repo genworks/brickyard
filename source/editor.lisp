@@ -303,7 +303,7 @@ nil when there is none."
                                  (list 0 0 0)))
                       ;; anywhere on the selected part first: the free end
                       ;; of a long axle is far from its middle
-                      (placed (or (and near (fit-spec (move-spec new start) specs :onto near :reach 10000))
+                      (placed (or (and near (fit-onto new specs near start))
                                   (and specs (fit-spec (move-spec new start) specs))
                                   (if specs (clear-spot new specs) (move-spec new '(0 0 0))))))
                  (funcall store (append specs (list placed)))
@@ -423,7 +423,11 @@ nil when there is none."
      ;; cl-who writes attribute values raw: the note is escaped here
      (:body :data-build build-id :data-note (and note (cl-who:escape-string note))
       (:header (:h1 "Brickyard")
-       (:span :id "build-name" (cl-who:str build-id))
+       (:span :id "build-name" :title "This build saves itself as you go; this page's address opens it again."
+        (cl-who:str build-id) (:span :class "saved" " saved"))
+       (:select :id "your-builds" :title "Builds you have opened in this browser" :hidden "hidden"
+        (:option :value "" "Your builds"))
+       (:a :href "#" :id "welcome-open" "Start here")
        (:a :href "/brickyard?new=1" "New build")
        (:a :href "/brickyard?new=robot" "Robot build")
        (:a :href "/brickyard?new=arm" "Arm robot")
@@ -458,6 +462,19 @@ nil when there is none."
         (:|x3d-canvas| :id "canvas" :|contextMenu| "false" :|splashScreen| "false"
          :|notifications| "false" :|timings| "false")
         (:div :id "message")
+        (:section :id "welcome" :hidden "hidden"
+         (:h2 "Start here")
+         (:ol
+          (:li (:b "See one work.") " Open the Gearbox, a motor turning a gear train, and press " (:b "Run") ".")
+          (:li (:b "Build your own.") " Choose " (:b "Empty build") ", then click " (:b "Motor")
+               " (under Robot in the parts bin), " (:b "Axle 4") " and " (:b "Gear 8")
+               ". Each part you click joins the part that glows.  Press " (:b "Run") ".")
+          (:li (:b "Change it.") " Click a part to select it; drag it to move it; R, T and E turn it; Del removes it.")
+          (:li (:b "Come back to it.") " Your build saves itself as you go.  " (:b "Your builds")
+               ", at the top, opens it again, and so does your invite link."))
+         (:div :class "welcome-buttons"
+          (:a :class "button" :href "/brickyard?new=gearbox" "Open the Gearbox")
+          (:button :type "button" :id "welcome-close" "Got it")))
         (:button :type "button" :id "run" "Run")
         (:button :type "button" :id "table-toggle" "Table")
         (:form :id "table-panel" :hidden "hidden"
@@ -516,8 +533,13 @@ an empty group the parts go into."
 ;; Publishing
 ;;
 
-(defun respond (req ent content-type body &key (code net.aserve:*response-ok*))
+(defun respond (req ent content-type body &key (code net.aserve:*response-ok*) last-build)
+  "Answer body; with last-build, a build id, the browser remembers it as
+the build to reopen (last-build-id)."
   (net.aserve:with-http-response (req ent :content-type content-type :response code)
+    (when last-build
+      (net.aserve:set-cookie-header req :name "brickyard_last" :value last-build :path "/brickyard"
+                                        :expires (+ (get-universal-time) (* 180 86400)) :http-only t))
     (net.aserve:with-http-body (req ent)
       (write-string body (net.aserve:request-reply-stream req)))))
 
@@ -525,6 +547,13 @@ an empty group the parts go into."
   (net.aserve:with-http-response (req ent :response net.aserve:*response-found*)
     (setf (net.aserve:reply-header-slot-value req :location) location)
     (net.aserve:with-http-body (req ent))))
+
+(defun last-build-id (req)
+  "The build this browser last opened, when it is still there: so the
+invite link, or /brickyard with no build named, brings a visitor back to
+their own work rather than a new sample."
+  (let ((id (cdr (assoc "brickyard_last" (net.aserve:get-cookie-values req) :test #'string=))))
+    (and (valid-build-id-p id) (bt:with-lock-held (*builds-lock*) (find-build id)) id)))
 
 (defun page-handler (req ent)
   (let ((new (net.aserve:request-query-value "new" req))
@@ -542,8 +571,10 @@ an empty group the parts go into."
           ((and id (bt:with-lock-held (*builds-lock*) (find-build id)))
            (respond req ent "text/html; charset=utf-8"
                     (page-html id (let ((note (net.aserve:request-query-value "note" req)))
-                                    (and note (subseq note 0 (min 600 (length note))))))))
-          (t (redirect req ent "/brickyard?new=1")))))
+                                    (and note (subseq note 0 (min 600 (length note))))))
+                    :last-build id))
+          (t (let ((last (last-build-id req)))
+               (redirect req ent (if last (format nil "/brickyard?b=~a" last) "/brickyard?new=1")))))))
 
 (defun export-handler (req ent)
   (let* ((id (net.aserve:request-query-value "b" req))
