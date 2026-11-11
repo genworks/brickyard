@@ -229,6 +229,11 @@ nil when there is none."
                              (the-object assembly drives))
                      'vector)
      :meshes (count-if #'(lambda (c) (member :mesh (fourth c))) (the-object assembly connections))
+     :mesh-pairs (coerce (mapcan #'(lambda (c)
+                                     (when (member :mesh (fourth c))
+                                       (list (vector (funcall id-of (first c)) (funcall id-of (second c))))))
+                                 (the-object assembly connections))
+                         'vector)
      :jammed (coerce (mapcar id-of (the-object assembly jammed)) 'vector)
      :ground (coerce (mapcar id-of (the-object assembly ground-contacts)) 'vector)
      :bom (coerce (mapcar #'(lambda (entry)
@@ -434,6 +439,7 @@ nil when there is none."
        (:a :href "/brickyard?new=sensors" "Sensor robot")
        (:a :href "/brickyard?new=spike" "SPIKE robot")
        (:a :href "/brickyard?new=gearbox" "Gearbox")
+       (:a :href "/brickyard?new=frame" "Gear frame")
        (:a :href "/brickyard?new=empty" "Empty build")
        (:a :href (format nil "/brickyard/export?b=~a" build-id) :id "export" "Export LDraw")
        (:label :class "import" "Import LDraw"
@@ -466,15 +472,15 @@ nil when there is none."
          (:h2 "Start here")
          (:ol
           (:li (:b "See one work.") " Open the Gearbox, a motor turning a gear train, and press " (:b "Run") ".")
-          (:li (:b "Build your own.") " Choose " (:b "Empty build") ", then click " (:b "Motor")
-               " (under Robot in the parts bin), " (:b "Axle 4") " and " (:b "Gear 8")
-               ". Each part you click joins the part that glows.  Press " (:b "Run") ".")
+          (:li (:b "Build a gear train.") " Choose " (:b "Gear frame") ".  Click the first axle so it glows, then " (:b "Gear 8")
+               " in the parts bin; the next axle, then " (:b "Gear 24") "; and so on.  Press " (:b "Run") ".")
           (:li (:b "Change it.") " Click or tap a part to select it, and drag it to move it; the buttons beside it turn, copy or delete it.  "
                (:b "Undo") " takes back any change.")
           (:li (:b "Come back to it.") " Your build saves itself as you go.  " (:b "Your builds")
                ", at the top, opens it again, and so does your invite link."))
          (:div :class "welcome-buttons"
           (:a :class "button" :href "/brickyard?new=gearbox" "Open the Gearbox")
+          (:a :class "button" :href "/brickyard?new=frame" "Gear frame")
           (:button :type "button" :id "welcome-close" "Got it")))
         (:div :id "part-tools" :hidden "hidden" :aria-label "The selected part"
          (:button :type "button" :data-act "turn" :title "Turn a quarter about the vertical (R)" "Turn")
@@ -583,6 +589,7 @@ their own work rather than a new sample."
                                                                 ((string= new "sensors") *sensor-build*)
                                                                 ((string= new "spike") *spike-build*)
                                                                 ((string= new "gearbox") *gearbox-build*)
+                                                                ((string= new "frame") *gear-frame-build*)
                                                                 (t *sample-build*)))))))
           ((and id (bt:with-lock-held (*builds-lock*) (find-build id)))
            (respond req ent "text/html; charset=utf-8"

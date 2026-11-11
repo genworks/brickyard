@@ -278,6 +278,46 @@ image is older than it."
   (let ((socket (usocket:socket-listen "127.0.0.1" 0)))
     (prog1 (usocket:get-local-port socket) (usocket:socket-close socket))))
 
+(defun test-gear-frame ()
+  "The Gear frame as the guide uses it: gears clicked onto its axles one
+by one go between the bricks and mesh in a train the motor turns, the
+report names each pair, and a 24 beside a 24 does not mesh."
+  (let* ((id (bt:with-lock-held (*builds-lock*) (make-build :specs *gear-frame-build*)))
+         (assembly (find-build id))
+         (add #'(lambda (teeth near)
+                  (operate assembly "add" (list (cons "type" "gear") (cons "size" teeth) (cons "color" "red")
+                                                (cons "near" (princ-to-string near))))
+                  (spec-id (car (last (the-object assembly part-specs)))))))
+    (unwind-protect
+         (progn
+           (check "the Gear frame stands whole: nothing loose or overlapping, the motor turning its axle"
+                  (and (null (the-object assembly loose)) (null (the-object assembly collisions))
+                       (equal (mapcar #'first (motion (the-object assembly part-specs))) '(2 3)))
+                  (list (the-object assembly loose) (the-object assembly collisions)))
+           (let ((gears (list (funcall add "8" 3) (funcall add "24" 4) (funcall add "8" 5) (funcall add "24" 6))))
+             (let ((pairs (coerce (gethash "mesh-pairs" (status-json assembly)) 'list))
+                   (turning (motion (the-object assembly part-specs))))
+               (check "gears clicked onto its axles mesh in a train, and the report names each pair"
+                      (and (null (the-object assembly loose)) (null (the-object assembly jammed))
+                           (equal (mapcar #'(lambda (pair) (coerce pair 'list)) pairs)
+                                  (list (list (first gears) (second gears)) (list (second gears) (third gears))
+                                        (list (third gears) (fourth gears)))))
+                      pairs)
+               (check "the motor turns the whole train, each gear against its neighbor"
+                      (equal (mapcar #'(lambda (g) (second (assoc g turning))) gears) '(1 -1/3 1 -1/3))
+                      (mapcar #'(lambda (g) (assoc g turning)) gears))))
+           (operate assembly "delete" (list (cons "id" "8")))
+           (funcall add "24" 4)
+           (operate assembly "delete" (list (cons "id" "7")))
+           (let ((second-big (funcall add "24" 3)))
+             (check "a 24 beside a 24 does not fit between the bricks: it goes to its axle's end, out of mesh"
+                    (and (notany #'(lambda (pair) (find second-big pair))
+                                 (coerce (gethash "mesh-pairs" (status-json assembly)) 'list))
+                         (> (abs (first (spec-at (find second-big (the-object assembly part-specs) :key #'spec-id)))) 40))
+                    (find second-big (the-object assembly part-specs) :key #'spec-id))))
+      (bt:with-lock-held (*builds-lock*) (remhash id *builds*))
+      (ignore-errors (delete-file (build-file id))))))
+
 (defun test-newcomer ()
   "A student's first build by the bin alone -- a motor, an axle on it, a
 gear on that -- turns when run; and /brickyard with no build named
@@ -536,6 +576,7 @@ gate with two invites, one of them an admin's."
   (test-spike)
   (test-missions)
   (test-newcomer)
+  (test-gear-frame)
   (test-undo)
   (test-admin)
   (format t "~&fingerprint ~s~%" (fingerprint))

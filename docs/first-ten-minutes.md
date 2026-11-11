@@ -28,21 +28,29 @@ gear, a big gear and a wheel.  Press **Run** at the lower right.
   *Motor (2) drives Wheel 5x2 (7) at 1/3 speed, reversed*: eight teeth
   driving twenty-four.
 
-## Minutes 3-6: build your own
+## Minutes 3-6: a gear train of your own
 
-Choose **Empty build** in the top bar.  Then, in the parts bin on the
-left:
+Choose **Gear frame** in the top bar.  You see two long Technic bricks
+holding four axles, two studs apart, and a motor turning the first
+axle.  There are no gears yet: they are yours to choose.
 
-1. **Motor** (under *Robot*, near the end of the bin).  It appears and
-   glows: it is selected.
-2. **Axle 4** (under *Technic*).  It goes into the motor's output and
-   sticks out of it, and now the axle glows.
-3. **Gear 8**.  It goes onto the axle.
-4. Press **Run**: the axle and the gear turn.
+1. Click (or tap) the first axle, the one in the motor; it glows.  Click
+   **Gear 8** in the parts bin (under *Technic*): it goes onto that axle,
+   between the bricks.
+2. Click the next axle, then **Gear 24**.
+3. Do the same for the last two axles: **Gear 8**, then **Gear 24**.
+4. Press **Run**: the train turns, each gear the other way from its
+   neighbor.  The **Build** report lists which gears mesh with which.
 
-Every part you click joins the part that glows.  If one lands beside
-the build instead, the message at the lower left says it is loose and
-what to try; **Undo** takes it away again.
+Neighbors mesh when their teeth add up to 32: 8 and 24, or 16 and 16.
+Two 24s on neighboring axles do not fit side by side, so the second goes
+onto the end of its axle, outside the bricks, and meshes with nothing;
+**Undo** takes it away again.  Every part you click joins the part that
+glows.  When gears hide an axle's middle, click the end of it that
+sticks out past the bricks.
+
+Starting from nothing instead: **Empty build**, then **Motor** (under
+*Robot*), **Axle 4** and **Gear 8**, each joining the last, and **Run**.
 
 ## Minutes 6-8: change it
 
@@ -79,10 +87,9 @@ did not happen as described.  Those are what a student meets too.
 
 ## Known limits, so they do not surprise you
 
-- A gear train of your own, gears on separate axles, needs a frame to
-  hold the axles the right distance apart (the Gearbox's two Technic
-  bricks do this).  Clicking alone does not build that frame yet;
-  dragging does.  Start from the Gearbox and change it.
+- A frame of your own, axles held the right distance apart, is built by
+  dragging axles into a Technic brick's holes; clicking alone puts an
+  axle in a hole you do not choose.  The Gear frame is that frame, ready.
 - On a tablet, tap to select and use the buttons beside the build in
   place of the keys.  Dragging a part by touch should work but has not
   yet been tried on a real tablet: say how it goes.  Nudging a part one

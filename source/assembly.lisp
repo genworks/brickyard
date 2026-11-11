@@ -88,6 +88,22 @@ from 16 mm, and two axles standing down from the front as skids.")
 a 24-tooth gear two studs away, which carries a wheel round at a third
 of the motor's speed, the other way.")
 
+(defparameter *gear-frame-build*
+  '((:type :technic-brick :size (16) :at (-30 0 0))
+    (:type :technic-brick :size (16) :at (30 0 0))
+    (:type :motor :at (100 -60 -10) :rear :left)
+    (:type :axle :size (5) :at (0 -60 14) :rear :right)
+    (:type :axle :size (6) :at (0 -20 14) :rear :right)
+    (:type :axle :size (6) :at (0 20 14) :rear :right)
+    (:type :axle :size (6) :at (0 60 14) :rear :right))
+  "List of specs. A gear train's frame with no gears: two long Technic
+bricks, a motor turning the first of four axles, each two studs from the
+next, so a gear clicked onto a selected axle goes between the bricks and
+meshes with its neighbor's when their teeth add up to 32 (8 and 24, or
+16 and 16).  The free axles stick out past the bricks, so one stays in
+sight, and can be clicked, once gears stand in front of its middle.  A
+newcomer's first train of their own.")
+
 
 (define-object assembly (base-object)
   :documentation (:description "A build: the parts its specs name, and what holds them together.")

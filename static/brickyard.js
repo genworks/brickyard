@@ -389,6 +389,9 @@
     const warnings = lines.length;
     if (status.meshes)
       lines.push(status.meshes + (status.meshes === 1 ? ' gear pair meshes' : ' gear pairs mesh'));
+    (status['mesh-pairs'] || []).slice(0, 8).forEach(function (pair) {
+      lines.push(name(pair[0]) + ' meshes with ' + name(pair[1]));
+    });
     const byMotor = new Map();
     status.drives.forEach(function (d) {
       if (!byMotor.has(d.motor)) byMotor.set(d.motor, []);
@@ -640,7 +643,7 @@
   });
   function welcomed() { try { localStorage.setItem('brickyard-welcomed', '1'); } catch (e) {} }
   document.getElementById('welcome-close').addEventListener('click', function () { showWelcome(false); welcomed(); });
-  welcome.querySelector('a.button').addEventListener('click', welcomed);
+  welcome.querySelectorAll('a.button').forEach(function (a) { a.addEventListener('click', welcomed); });
   try { if (!localStorage.getItem('brickyard-welcomed')) showWelcome(true); } catch (e) { showWelcome(true); }
 
   // Start: the empty world, then every part.
