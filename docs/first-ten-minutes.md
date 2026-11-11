@@ -46,10 +46,13 @@ what to try; **Undo** takes it away again.
 
 ## Minutes 6-8: change it
 
-- Click a part to select it.  Drag it to slide it; it snaps into place
-  when you let go, and what it carries comes along.
-- **R**, **T** and **E** turn the selected part a quarter turn;
-  **Del** removes it.
+- Click (or tap) a part to select it.  Drag it to slide it; it snaps
+  into place when you let go, and what it carries comes along.
+- Buttons appear at the right of the build while a part is selected:
+  **Turn**, **Tilt** and **Roll** a quarter turn, **Swing** 15 degrees
+  about the pin or axle it hangs on, **Copy**, **Delete**, **Let go**.
+  With a keyboard, **R**, **T**, **E**, **[** **]**, **C**, **Del** and
+  **Esc** do the same.
 - **Undo** and **Redo** at the lower left (or Ctrl+Z and Ctrl+Y) take
   back any change, one at a time.  Try deleting the motor, then Undo.
 
@@ -80,9 +83,11 @@ did not happen as described.  Those are what a student meets too.
   hold the axles the right distance apart (the Gearbox's two Technic
   bricks do this).  Clicking alone does not build that frame yet;
   dragging does.  Start from the Gearbox and change it.
-- On a tablet there are no keys: turning (R, T, E) and deleting (Del)
-  a part need a keyboard for now.  Clicking, dragging, Run, Undo and
-  Redo work by touch.
+- On a tablet, tap to select and use the buttons beside the build in
+  place of the keys.  Dragging a part by touch should work but has not
+  yet been tried on a real tablet: say how it goes.  Nudging a part one
+  stud at a time (the arrow keys) and moving a part alone without what
+  it carries (Shift) still need a keyboard.
 - The box at the top ("Describe what to build") asks a language model
   to build for you.  Each prompt draws on Brickyard's shared allowance,
   so use it, but not in a loop.

@@ -469,13 +469,24 @@ nil when there is none."
           (:li (:b "Build your own.") " Choose " (:b "Empty build") ", then click " (:b "Motor")
                " (under Robot in the parts bin), " (:b "Axle 4") " and " (:b "Gear 8")
                ". Each part you click joins the part that glows.  Press " (:b "Run") ".")
-          (:li (:b "Change it.") " Click a part to select it; drag it to move it; R, T and E turn it; Del removes it.  "
+          (:li (:b "Change it.") " Click or tap a part to select it, and drag it to move it; the buttons beside it turn, copy or delete it.  "
                (:b "Undo") " takes back any change.")
           (:li (:b "Come back to it.") " Your build saves itself as you go.  " (:b "Your builds")
                ", at the top, opens it again, and so does your invite link."))
          (:div :class "welcome-buttons"
           (:a :class "button" :href "/brickyard?new=gearbox" "Open the Gearbox")
           (:button :type "button" :id "welcome-close" "Got it")))
+        (:div :id "part-tools" :hidden "hidden" :aria-label "The selected part"
+         (:button :type "button" :data-act "turn" :title "Turn a quarter about the vertical (R)" "Turn")
+         (:button :type "button" :data-act "tilt" :title "Tilt a quarter (T)" "Tilt")
+         (:button :type "button" :data-act "roll" :title "Roll a quarter (E)" "Roll")
+         (:button :type "button" :data-act "rotate" :data-degrees "-15"
+                  :title "Swing 15 degrees back about the pin or axle it hangs on ([)" "Swing &#8634;")
+         (:button :type "button" :data-act "rotate" :data-degrees "15"
+                  :title "Swing 15 degrees on about the pin or axle it hangs on (])" "Swing &#8635;")
+         (:button :type "button" :data-act "copy" :title "Copy on top (C)" "Copy")
+         (:button :type "button" :data-act "delete" :class "danger" :title "Remove (Del)" "Delete")
+         (:button :type "button" :data-act "let-go" :title "Let go (Esc)" "Let go"))
         (:div :id "undo-row"
          (:button :type "button" :id "undo" :title "Undo (Ctrl+Z)" :disabled "disabled" "Undo")
          (:button :type "button" :id "redo" :title "Redo (Ctrl+Y)" :disabled "disabled" "Redo"))

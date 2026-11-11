@@ -362,6 +362,7 @@
       eachMaterial(part.inner, function (m) { m.emissiveColor = glow; });
     });
     document.querySelectorAll('#bom tr').forEach(function (tr) { tr.classList.remove('selected'); });
+    partTools.hidden = selected === null || !parts.has(selected);
   }
 
   function select(id) {
@@ -447,28 +448,44 @@
     ArrowLeft: [-20, 0, 0], ArrowRight: [20, 0, 0], ArrowUp: [0, 20, 0], ArrowDown: [0, -20, 0],
     PageUp: [0, 0, 8], PageDown: [0, 0, -8]
   };
-  document.addEventListener('keydown', function (e) {
-    if (selected === null || e.target.closest('input, textarea')) return;
-    const key = e.key, id = selected, carry = e.shiftKey ? 0 : 1;
-    if (nudges[key]) {
-      const d = nudges[key];
-      api('move', { id: id, dx: d[0], dy: d[1], dz: d[2], nudge: 1, carry: carry });
-    } else if (key === 'r' || key === 'R') api('turn', { id: id, carry: carry });
-    else if (key === 't' || key === 'T') api('tilt', { id: id, carry: carry });
-    else if (key === 'e' || key === 'E') api('roll', { id: id, carry: carry });
-    // swing about the pin or axle it hangs on: [ ] by 15 degrees, Alt by 5;
-    // Shift gives { } on most keyboards, so those count too
-    else if (key === '[' || key === '{' || e.code === 'BracketLeft')
-      api('rotate', { id: id, degrees: e.altKey ? -5 : -15, carry: carry });
-    else if (key === ']' || key === '}' || e.code === 'BracketRight')
-      api('rotate', { id: id, degrees: e.altKey ? 5 : 15, carry: carry });
-    else if (key === 'c' || key === 'C') api('copy', { id: id }).then(function () {
+  // What can be done to the selected part, by key or by the buttons
+  // beside the stage (a tablet has no keys).  carry 0: the part alone.
+  function act(name, carry, degrees) {
+    const id = selected;
+    if (id === null) return;
+    if (name === 'turn' || name === 'tilt' || name === 'roll') api(name, { id: id, carry: carry });
+    else if (name === 'rotate') api('rotate', { id: id, degrees: degrees, carry: carry });
+    else if (name === 'copy') api('copy', { id: id }).then(function () {
       select(Math.max.apply(null, Array.from(parts.keys())));
     });
-    else if (key === 'Delete' || key === 'Backspace') api('delete', { id: id });
-    else if (key === 'Escape') select(null);
+    else if (name === 'delete') api('delete', { id: id });
+    else if (name === 'let-go') select(null);
+  }
+  document.addEventListener('keydown', function (e) {
+    if (selected === null || e.target.closest('input, textarea')) return;
+    if (e.ctrlKey || e.metaKey) return;
+    const key = e.key, carry = e.shiftKey ? 0 : 1;
+    if (nudges[key]) {
+      const d = nudges[key];
+      api('move', { id: selected, dx: d[0], dy: d[1], dz: d[2], nudge: 1, carry: carry });
+    } else if (key === 'r' || key === 'R') act('turn', carry);
+    else if (key === 't' || key === 'T') act('tilt', carry);
+    else if (key === 'e' || key === 'E') act('roll', carry);
+    // swing about the pin or axle it hangs on: [ ] by 15 degrees, Alt by 5;
+    // Shift gives { } on most keyboards, so those count too
+    else if (key === '[' || key === '{' || e.code === 'BracketLeft') act('rotate', carry, e.altKey ? -5 : -15);
+    else if (key === ']' || key === '}' || e.code === 'BracketRight') act('rotate', carry, e.altKey ? 5 : 15);
+    else if (key === 'c' || key === 'C') act('copy');
+    else if (key === 'Delete' || key === 'Backspace') act('delete');
+    else if (key === 'Escape') act('let-go');
     else return;
     e.preventDefault();
+  });
+  const partTools = document.getElementById('part-tools');
+  partTools.querySelectorAll('button').forEach(function (button) {
+    button.addEventListener('click', function () {
+      act(button.dataset.act, 1, Number(button.dataset.degrees || 0));
+    });
   });
 
   // The prompt box, when the server has one.  A prompt runs on the server
