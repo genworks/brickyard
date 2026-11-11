@@ -359,6 +359,9 @@ hardware and has to wait its turn.  Answers the agent."
     (when text
       (let ((turns (append (gethash id *histories*) (list (cons prompt text)))))
         (setf (gethash id *histories*) (last turns *history-turns*))))
+    ;; the whole prompt is one step for the page's undo
+    (unless (eq (gethash id *before-prompt*) (the-object assembly part-specs))
+      (note-change! id (gethash id *before-prompt*)))
     (multiple-value-bind (changed removed)
         (specs-change (gethash id *before-prompt*) (the-object assembly part-specs))
       (let ((reply (reply assembly :changed changed :removed removed :ok (getf answer :ok)
@@ -366,7 +369,7 @@ hardware and has to wait its turn.  Answers the agent."
                                                 (and failed (format nil "Stopped: ~a" (getf failed :error)))))))
         (setf (gethash "reply" reply) (or (getf answer :reply) "")
               (gethash "forms" reply) (coerce (getf answer :forms) 'vector))
-        reply))))
+        (undo-counts reply id)))))
 
 (defun run-prompt (id prompt session offered)
   "Ask the model offered, an entry of *agents*, run what it answers on
@@ -427,11 +430,12 @@ build id, and leave the reply in *prompts*."
            (let* ((assembly (find-build id))
                   (now (the-object assembly part-specs)))
              (multiple-value-bind (changed removed) (specs-change now before)
+               (note-change! id now)
                (the-object assembly (set-slot! :part-specs before))
                (save-build id assembly)
                (remhash id *before-prompt*)
                (remhash id *histories*)
-               (reply assembly :changed changed :removed removed)))))))
+               (undo-counts (reply assembly :changed changed :removed removed) id)))))))
 
 (defun prompt-handler (req ent)
   "POST b and action: start with prompt, poll, or undo."

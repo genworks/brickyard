@@ -252,8 +252,22 @@
       .catch(function (err) { say('The server did not answer: ' + err); });
   });
 
+  // Undo and redo: the server keeps each build's steps; the buttons are
+  // live while there is something to take back or put back.
+  const undoButton = document.getElementById('undo');
+  const redoButton = document.getElementById('redo');
+  undoButton.addEventListener('click', function () { api('undo'); });
+  redoButton.addEventListener('click', function () { api('redo'); });
+  document.addEventListener('keydown', function (e) {
+    if (!(e.ctrlKey || e.metaKey) || (e.target.closest && e.target.closest('input, textarea, select'))) return;
+    const key = e.key.toLowerCase();
+    if (key === 'z' && !e.shiftKey) { e.preventDefault(); api('undo'); }
+    else if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); api('redo'); }
+  });
+
   async function apply(reply) {
     say(reply.message || '');
+    if (reply.undo !== undefined) { undoButton.disabled = !reply.undo; redoButton.disabled = !reply.redo; }
     // a part that changed is drawn anew, and the plan no longer holds
     if ((reply.parts || []).length || (reply.removed || []).length) { stopMotion(); closeTable(); }
     removeParts(reply.removed || []);

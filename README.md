@@ -6,6 +6,9 @@ of part specs; Brickyard works out which parts hold each other, which
 collide, which are loose, and pulls a dropped part onto the nearest
 place it fits.
 
+New to the editor?  [The first ten minutes with Brickyard](docs/first-ten-minutes.md)
+walks from an invite link to a build of your own.
+
 ```lisp
 (asdf:load-system :brickyard)
 

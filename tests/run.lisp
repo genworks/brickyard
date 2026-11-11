@@ -335,6 +335,59 @@ reopens the one this browser had open, over a real connection."
             (bt:with-lock-held (*builds-lock*) (remhash made *builds*))
             (ignore-errors (delete-file (build-file made)))))))))
 
+(defun test-undo ()
+  "Undo and redo of the page's edits, over a real connection: each change
+one step, the page's own asking none, a new change forgets redo, and a
+prompt's whole change one step."
+  (let* ((port (free-port))
+         (server (net.aserve:start :port port :server :new :listeners 2 :host "127.0.0.1"))
+         (old *gate*)
+         (id nil))
+    (labels ((op (name &rest pairs)
+               (yason:parse (net.aserve.client:do-http-request
+                             (format nil "http://127.0.0.1:~d/brickyard/api" port)
+                             :method :post :content-type "application/x-www-form-urlencoded"
+                             :content (format nil "b=~a&op=~a~{&~a=~a~}" id name pairs))))
+             (count-of (reply) (gethash "count" (gethash "status" reply)))
+             (steps (reply) (list (gethash "undo" reply) (gethash "redo" reply))))
+      (unwind-protect
+           (progn
+             (setf *gate* nil)
+             (publish-brickyard server)
+             (setf id (bt:with-lock-held (*builds-lock*) (make-build :specs nil)))
+             (op "add" "type" "motor" "color" "red")
+             (op "add" "type" "axle" "size" "4" "color" "red" "near" "0")
+             (let ((state (op "state")) (carried (op "carried" "id" "0")))
+               (declare (ignore carried))
+               (check "each change is a step; asking the build's state is none" (equal (steps state) '(2 0))
+                      (steps state)))
+             (let* ((one (op "undo")) (two (op "undo")) (none (op "undo")) (back (op "redo")))
+               (check "undo takes the build back a step at a time, and says when there is nothing left"
+                      (and (eql 1 (count-of one)) (eql 0 (count-of two))
+                           (null (gethash "ok" none)) (equal "Nothing to undo." (gethash "message" none)))
+                      (list (count-of one) (count-of two) (gethash "message" none)))
+               (check "redo puts it back" (and (eql 1 (count-of back)) (equal (steps back) '(1 1)))
+                      (steps back)))
+             (let ((fresh (op "add" "type" "brick" "size" "2+4" "color" "blue")))
+               (check "a new change after undo forgets redo" (equal (steps fresh) '(2 0)) (steps fresh)))
+             (bt:with-lock-held (*builds-lock*)
+               (let ((assembly (find-build id)))
+                 (setf (gethash id *before-prompt*) (the-object assembly part-specs))
+                 (operate assembly "add" '(("type" . "gear") ("size" . "8") ("color" . "red") ("near" . "1")))
+                 (operate assembly "add" '(("type" . "gear") ("size" . "24") ("color" . "red")))
+                 (finished-prompt id "two gears" '(:ok t))))
+             (let ((after (op "state")) (undone (op "undo")))
+               (check "a prompt's whole change is one step"
+                      (and (equal (steps after) '(3 0)) (eql 2 (count-of undone)))
+                      (list (steps after) (count-of undone)))))
+        (net.aserve:shutdown :server server)
+        (setf *gate* old)
+        (when id
+          (bt:with-lock-held (*builds-lock*)
+            (remhash id *builds*) (remhash id *undo*) (remhash id *redo*)
+            (remhash id *before-prompt*) (remhash id *histories*))
+          (ignore-errors (delete-file (build-file id))))))))
+
 (defun test-admin ()
   "The activity log and the admin page over a real connection, behind a
 gate with two invites, one of them an admin's."
@@ -483,6 +536,7 @@ gate with two invites, one of them an admin's."
   (test-spike)
   (test-missions)
   (test-newcomer)
+  (test-undo)
   (test-admin)
   (format t "~&fingerprint ~s~%" (fingerprint))
   (let ((failed (count nil *checks* :key #'second)))

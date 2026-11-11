@@ -469,12 +469,16 @@ nil when there is none."
           (:li (:b "Build your own.") " Choose " (:b "Empty build") ", then click " (:b "Motor")
                " (under Robot in the parts bin), " (:b "Axle 4") " and " (:b "Gear 8")
                ". Each part you click joins the part that glows.  Press " (:b "Run") ".")
-          (:li (:b "Change it.") " Click a part to select it; drag it to move it; R, T and E turn it; Del removes it.")
+          (:li (:b "Change it.") " Click a part to select it; drag it to move it; R, T and E turn it; Del removes it.  "
+               (:b "Undo") " takes back any change.")
           (:li (:b "Come back to it.") " Your build saves itself as you go.  " (:b "Your builds")
                ", at the top, opens it again, and so does your invite link."))
          (:div :class "welcome-buttons"
           (:a :class "button" :href "/brickyard?new=gearbox" "Open the Gearbox")
           (:button :type "button" :id "welcome-close" "Got it")))
+        (:div :id "undo-row"
+         (:button :type "button" :id "undo" :title "Undo (Ctrl+Z)" :disabled "disabled" "Undo")
+         (:button :type "button" :id "redo" :title "Redo (Ctrl+Y)" :disabled "disabled" "Redo"))
         (:button :type "button" :id "run" "Run")
         (:button :type "button" :id "table-toggle" "Table")
         (:form :id "table-panel" :hidden "hidden"
@@ -512,7 +516,8 @@ nil when there is none."
          (:dt "Shift") (:dd "with any of these: the part alone")
          (:dt "C") (:dd "copy on top")
          (:dt "Del") (:dd "remove")
-         (:dt "Esc") (:dd "let go"))))))))
+         (:dt "Esc") (:dd "let go")
+         (:dt "Ctrl Z, Y") (:dd "undo, redo"))))))))
 
 (defun scene-x3d ()
   "The page's starting world: z-up model space inside a y-up wrapper, and
@@ -605,6 +610,43 @@ their own work rather than a new sample."
                                        :note (import-note (length specs) report))))))))
     (respond req ent "application/json" (with-output-to-string (s) (yason:encode reply s)))))
 
+(defvar *undo* (make-hash-table :test #'equal)
+  "Hash table from build id to its part-specs before each change made
+from the page or a prompt, newest first: what undo goes back to.  In
+memory: a restart keeps the build, not its history.")
+
+(defvar *redo* (make-hash-table :test #'equal)
+  "Hash table from build id to what undo took back, newest first.")
+
+(defparameter *undo-depth* 100 "Integer. The most changes of a build undo can take back.")
+
+(defun note-change! (id before)
+  "Before, the build's specs as they were, becomes the newest undo step;
+redo is forgotten, as in any editor.  Call with *builds-lock* held."
+  (setf (gethash id *undo*) (let ((steps (cons before (gethash id *undo*))))
+                              (if (> (length steps) *undo-depth*) (subseq steps 0 *undo-depth*) steps)))
+  (remhash id *redo*))
+
+(defun undo-counts (reply id)
+  "Reply, telling the page how many steps undo and redo hold for build id."
+  (setf (gethash "undo" reply) (length (gethash id *undo*))
+        (gethash "redo" reply) (length (gethash id *redo*)))
+  reply)
+
+(defun step-back (assembly id from to)
+  "Undo (from *undo*, to *redo*) or redo (the other way): the build goes
+back to the newest step of from, and its specs as they stand become the
+newest of to.  The reply redraws every part."
+  (let ((steps (gethash id from)))
+    (if (null steps)
+        (reply assembly :ok nil :message (if (eq from *undo*) "Nothing to undo." "Nothing to redo."))
+        (let ((now (the-object assembly part-specs)))
+          (push now (gethash id to))
+          (setf (gethash id from) (rest steps))
+          (the-object assembly (set-slot! :part-specs (first steps)))
+          (reply assembly :removed (mapcar #'spec-id now)
+                          :changed (mapcar #'spec-id (the-object assembly part-specs)))))))
+
 (defun api-handler (req ent)
   (let* ((params (net.aserve:form-urlencoded-to-query (gwl:request-body-text req)))
          (id (cdr (assoc "b" params :test #'string=)))
@@ -612,9 +654,15 @@ their own work rather than a new sample."
          (result (bt:with-lock-held (*builds-lock*)
                    (let ((assembly (find-build id)))
                      (if assembly
-                         (let ((reply (operate assembly op params)))
+                         (let* ((before (the-object assembly part-specs))
+                                (reply (cond ((string= op "undo") (step-back assembly id *undo* *redo*))
+                                             ((string= op "redo") (step-back assembly id *redo* *undo*))
+                                             (t (operate assembly op params)))))
+                           (unless (or (eq before (the-object assembly part-specs))
+                                       (member op '("undo" "redo") :test #'string=))
+                             (note-change! id before))
                            (unless (string= op "state") (save-build id assembly))
-                           reply)
+                           (undo-counts reply id))
                          (json-object :ok nil :message "No such build."))))))
     (respond req ent "application/json"
              (with-output-to-string (s) (yason:encode result s)))))
